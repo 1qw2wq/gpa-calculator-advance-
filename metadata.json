@@ -1,0 +1,6 @@
+{
+  "name": "GPA Tracker with Memories",
+  "description": "An advanced GPA tracking system with custom semester logs, grade calculations, import/export options, an intro page, and local memories stored on your device.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

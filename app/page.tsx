@@ -1,0 +1,1924 @@
+"use client";
+
+import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
+
+// Types matching the state representations
+interface Course {
+  id: string;
+  category: string;
+  courseName: string;
+  score: string;
+  credit: string;
+  level?: "Regular" | "Honors" | "AP/IB" | "Custom";
+  weightBoost?: string;
+}
+
+interface Term {
+  id: string;
+  title: string;
+  courses: Course[];
+  reflection: string;       // Semester reflective diary notes
+  bullets: string[];        // Tagged memories / key achievements
+  aiAdvice?: string;        // Cache for server-side AI academic mentor insight
+}
+
+interface GpaSnapshot {
+  id: string;
+  timestamp: string;
+  gpa: string;
+  totalCredits: number;
+  qualityPoints: number;
+  note: string;
+  terms?: Term[];
+}
+
+const INK_ACCENTS = [
+  { name: "Charcoal Ink", color: "#1A1A1A", hover: "#2D2D2D", light: "#F5F5F5" },
+  { name: "Burgundy Ink", color: "#541212", hover: "#701A1A", light: "#FAF4F4" },
+  { name: "Royal Blue Ink", color: "#0F2C59", hover: "#184A96", light: "#F4F7FA" },
+  { name: "Forest Green Ink", color: "#1E3F20", hover: "#2E5E32", light: "#F4FAF4" },
+  { name: "Warm Terracotta", color: "#6E3C09", hover: "#8A4F10", light: "#FAF6F4" }
+];
+
+// Predefined catalog of categories and courses
+const predefinedCourseCategories: Record<string, string[]> = {
+  "Core Subjects": [
+    "English Literature", "EAP (English for Academic Purposes)", "AP English Literature", "AP English Language", "Creative Writing", "Speech and Debate", "Journalism",
+    "Mathematics", "AP Calculus AB", "AP Calculus BC", "AP Statistics", "Algebra I", "Algebra II", "Geometry", "Pre-Calculus", "Discrete Math",
+    "Physics", "AP Physics 1", "AP Physics 2", "AP Physics C: Mechanics", "AP Physics C: Electricity and Magnetism", "Conceptual Physics",
+    "Chemistry", "AP Chemistry", "Organic Chemistry", "Inorganic Chemistry", "Biochemistry",
+    "Biology", "AP Biology", "Anatomy and Physiology", "Genetics", "Ecology", "Marine Biology", "Botany", "Zoology", "Microbiology",
+    "History", "AP World History", "AP US History", "AP European History", "AP Human Geography", "Civics", "Economics", "Political Science", "Sociology", "Psychology",
+    "Social Studies", "AP Psychology", "AP Economics (Micro)", "AP Economics (Macro)", "AP US Government and Politics", "AP Comparative Government and Politics", "World Geography", "US Geography"
+  ],
+  "Languages": [
+    "Chinese", "Chinese Language", "Chinese Literature", "AP Chinese Language and Culture", "Chinese Calligraphy", "Chinese History",
+    "Spanish", "AP Spanish Language and Culture", "AP Spanish Literature and Culture", "Spanish for Native Speakers", "Spanish Conversation",
+    "French", "AP French Language and Culture", "AP French Literature and Culture", "French Conversation",
+    "Japanese", "AP Japanese Language and Culture", "Japanese Culture",
+    "German", "AP German Language and Culture", "German Literature",
+    "Latin", "AP Latin", "Classical Literature",
+    "Korean", "Korean Language", "Korean Culture",
+    "Italian", "Russian", "Arabic", "Portuguese", "Sign Language"
+  ],
+  "Arts": [
+    "Music", "Music Theory", "AP Music Theory", "Band", "Orchestra", "Choir", "Vocal Music", "Instrumental Music", "Music Appreciation", "Music History", "Digital Music", "Music Composition", "Music Performance",
+    "Art", "Drawing", "Painting", "Sculpture", "Ceramics", "Digital Art", "AP Art History", "AP Studio Art (2-D Design)", "AP Studio Art (3-D Design)", "AP Studio Art (Drawing)", "Photography", "Film Studies", "Graphic Design", "Animation", "Fashion Design", "Interior Design",
+    "Drama", "Theatre", "Acting", "Stagecraft", "Playwriting", "Directing", "Film Production", "Screenwriting", "Improvisation", "Costume Design", "Set Design",
+    "Dance", "Ballet", "Modern Dance", "Jazz Dance", "Hip Hop Dance", "Folk Dance", "Choreography", "Dance History", "Tap Dance", "Ballroom Dance", "Contemporary Dance"
+  ],
+  "Business & Technology": [
+    "Business Studies", "Introduction to Business", "Business Management", "Marketing", "Accounting", "Economics", "Personal Finance", "Entrepreneurship", "Business Law", "International Business", "Business Ethics", "Human Resources Management",
+    "Computer Science", "Coding", "Web Development", "Game Design", "Cybersecurity", "AP Computer Science Principles", "AP Computer Science A", "Data Science", "Information Technology", "Computer Graphics", "Database Management", "Network Administration", "Software Engineering", "Mobile App Development", "Artificial Intelligence", "Machine Learning", "Robotics Programming"
+  ],
+  "Physical Education": [
+    "PE (Physical Education)", "Health", "Wellness", "Sports", "Team Sports", "Individual Sports", "Yoga", "Pilates", "Weight Training", "Aerobics", "Swimming", "Track and Field", "Basketball", "Soccer", "Volleyball", "Tennis", "Badminton", "Dance Fitness", "Cross Country", "Golf", "Gymnastics", "Lacrosse", "Rock Climbing", "Self-Defense", "Water Polo", "Zumba"
+  ],
+  "Other Electives": [
+    "Philosophy", "Ethics", "Logic", "Debate", "Public Speaking", "Leadership", "Study Skills", "Creative Writing", "Yearbook", "Student Government", "Community Service", "Robotics", "Engineering", "Architecture", "Psychology", "Sociology", "Anthropology",
+    "Environmental Science", "AP Environmental Science", "Sustainability Studies", "Astronomy", "Geology", "Oceanography", "Meteorology", "Earth Science", "Climate Science", "Forensics", "Journalism", "Media Literacy", "Digital Citizenship", "Film Studies",
+    "Library Science", "Research Skills", "Test Preparation", "Career Planning", "Personal Development", "Financial Literacy", "Civic Engagement", "World Religions", "Comparative Cultures", "Culinary Arts", "BSS"
+  ],
+  "Chinese Specific": [
+    "Chinese Math", "Chinese Chemistry", "Chinese Biology", "Chinese History", "Chinese Calligraphy", "Chinese Geography", "Chinese Culture", "Advanced Chinese Literature", "Classical Chinese Literature", "AP Chinese Language and Culture", "Chinese Art History", "Chinese Philosophy", "Chinese Music Theory", "Chinese Technology", "Chinese Politics"
+  ]
+};
+
+const convertScoreToGradePoint = (score: number): number => {
+  if (score >= 97.1) return 4.33;
+  if (score >= 93.97) return 4.0;
+  if (score >= 90.93) return 3.63;
+  if (score >= 87.9) return 3.33;
+  if (score >= 83.37) return 3.0;
+  if (score >= 80.83) return 2.63;
+  if (score >= 77) return 2.33;
+  if (score >= 73) return 2.0;
+  if (score >= 70) return 1.67;
+  if (score >= 67) return 1.33;
+  if (score >= 63) return 1.0;
+  if (score >= 60) return 0.67;
+  return 0.0;
+};
+
+export default function Home() {
+  // State variables loaded from Local Storage
+  const [terms, setTerms] = useState<Term[]>([]);
+  const [snapshots, setSnapshots] = useState<GpaSnapshot[]>([]);
+  
+  // Custom academic goals stored locally on the user's computer
+  const [targetGpa, setTargetGpa] = useState<string>("3.80");
+  const [targetCredits, setTargetCredits] = useState<string>("120");
+  const [personalMotivator, setPersonalMotivator] = useState<string>(
+    "To build a strong academic foundation, reflect on my progress, and prepare for graduation."
+  );
+
+  // UI state variables
+  const [showIntro, setShowIntro] = useState<boolean>(true);
+  const [isExportModelOpen, setIsExportModelOpen] = useState<boolean>(false);
+  const [isScaleModalOpen, setIsScaleModalOpen] = useState<boolean>(false);
+  const [exportFormat, setExportFormat] = useState<"csv" | "txt">("csv");
+  const [completedHydration, setCompletedHydration] = useState<boolean>(false);
+  
+  // Customization & styling settings
+  const [activeAccent, setActiveAccent] = useState<string>("Charcoal Ink");
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  
+  // Snapshot recording modal helper
+  const [isSnapshotModalOpen, setIsSnapshotModalOpen] = useState<boolean>(false);
+  const [snapshotNote, setSnapshotNote] = useState<string>("");
+
+  // Input fields for bullets memory additions
+  const [bulletInputs, setBulletInputs] = useState<Record<string, string>>({});
+  
+  // Active autocomplete suggestion tracker: { termId, courseId }
+  const [activeSuggestionBox, setActiveSuggestionBox] = useState<{ termId: string; courseId: string } | null>(null);
+
+  // Server-side AI mentoring helpers
+  const [isGeneratingMentorAdvice, setIsGeneratingMentorAdvice] = useState<boolean>(false);
+  const [isGeneratingSemesterAdvice, setIsGeneratingSemesterAdvice] = useState<Record<string, boolean>>({});
+  const [globalMentorAdvice, setGlobalMentorAdvice] = useState<string>("");
+
+  // Custom alert & confirmation modal states to bypass iframe/sandbox confirm/alert blocks
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    message: "",
+    onConfirm: () => {},
+  });
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    message: string;
+  }>({
+    isOpen: false,
+    message: "",
+  });
+
+  const showConfirm = (message: string, onConfirm: () => void) => {
+    setConfirmModal({
+      isOpen: true,
+      message,
+      onConfirm,
+    });
+  };
+
+  const showAlert = (message: string) => {
+    setAlertModal({
+      isOpen: true,
+      message,
+    });
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const writeDefaultTerms = () => {
+    const defaultCourse: Course = {
+      id: "course-1-1",
+      category: "Core Subjects",
+      courseName: "",
+      score: "",
+      credit: ""
+    };
+    const defaultTerm: Term = {
+      id: "term-1",
+      title: "Semester 1",
+      courses: [defaultCourse],
+      reflection: "",
+      bullets: ["Set up my GPA tracker for the semester!"]
+    };
+    setTerms([defaultTerm]);
+    localStorage.setItem("gpaTracker_terms", JSON.stringify([defaultTerm]));
+  };
+
+  // Step 1: Handle Client Hydration & Local Storage Retrieval (using setTimeout to avoid synchronous setState inside render effects)
+  useEffect(() => {
+    const retrieveState = () => {
+      // Retrieve terms
+      const storedTerms = localStorage.getItem("gpaTracker_terms");
+      if (storedTerms) {
+        try {
+          setTerms(JSON.parse(storedTerms));
+        } catch (e) {
+          console.error("Failed to parse stored terms, writing default");
+          writeDefaultTerms();
+        }
+      } else {
+        writeDefaultTerms();
+      }
+
+      // Retrieve snapshots
+      const storedSnapshots = localStorage.getItem("gpaTracker_snapshots");
+      if (storedSnapshots) {
+        try {
+          setSnapshots(JSON.parse(storedSnapshots));
+        } catch (e) {
+          console.error("Failed to parse stored snapshots");
+        }
+      }
+
+      // Retrieve target goals
+      const storedTargetGpa = localStorage.getItem("gpaTracker_targetGpa");
+      if (storedTargetGpa) setTargetGpa(storedTargetGpa);
+      const storedTargetCredits = localStorage.getItem("gpaTracker_targetCredits");
+      if (storedTargetCredits) setTargetCredits(storedTargetCredits);
+      const storedMotivator = localStorage.getItem("gpaTracker_personalMotivator");
+      if (storedMotivator) setPersonalMotivator(storedMotivator);
+
+      const storedShowIntro = localStorage.getItem("gpaTracker_showIntro");
+      if (storedShowIntro) {
+        setShowIntro(storedShowIntro === "true");
+      }
+
+      // Retrieve custom details
+      const storedAccent = localStorage.getItem("gpaTracker_accent");
+      if (storedAccent) setActiveAccent(storedAccent);
+
+      const storedCustomCats = localStorage.getItem("gpaTracker_customCategories");
+      if (storedCustomCats) {
+        try {
+          setCustomCategories(JSON.parse(storedCustomCats));
+        } catch (e) {
+          console.error("Failed to parse stored custom categories");
+        }
+      }
+
+      setCompletedHydration(true);
+    };
+
+    setTimeout(retrieveState, 0);
+  }, []);
+
+  // Sync to database
+  const syncTerms = (updatedTerms: Term[]) => {
+    setTerms(updatedTerms);
+    localStorage.setItem("gpaTracker_terms", JSON.stringify(updatedTerms));
+  };
+
+  // State syncers for goals
+  const syncTargetGpa = (val: string) => {
+    setTargetGpa(val);
+    localStorage.setItem("gpaTracker_targetGpa", val);
+  };
+  const syncTargetCredits = (val: string) => {
+    setTargetCredits(val);
+    localStorage.setItem("gpaTracker_targetCredits", val);
+  };
+  const syncPersonalMotivator = (val: string) => {
+    setPersonalMotivator(val);
+    localStorage.setItem("gpaTracker_personalMotivator", val);
+  };
+
+  // GPA calculation helper
+  const getTotals = () => {
+    let totalWeightedGradePoints = 0;
+    let totalUnweightedGradePoints = 0;
+    let totalCredits = 0;
+
+    terms.forEach((term) => {
+      term.courses.forEach((course) => {
+        const score = parseFloat(course.score);
+        const credit = parseFloat(course.credit);
+
+        if (!isNaN(score) && !isNaN(credit)) {
+          const gradePoint = convertScoreToGradePoint(score);
+          
+          let boost = 0;
+          if (course.level === "Honors") {
+            boost = 0.5;
+          } else if (course.level === "AP/IB") {
+            boost = 1.0;
+          } else if (course.level === "Custom" && course.weightBoost) {
+            boost = parseFloat(course.weightBoost) || 0;
+          }
+
+          totalWeightedGradePoints += (gradePoint + boost) * credit;
+          totalUnweightedGradePoints += gradePoint * credit;
+          totalCredits += credit;
+        }
+      });
+    });
+
+    const gpa = totalCredits === 0 ? 0 : totalWeightedGradePoints / totalCredits;
+    const unweightedGpa = totalCredits === 0 ? 0 : totalUnweightedGradePoints / totalCredits;
+    return {
+      gpa: gpa.toFixed(2),
+      unweightedGpa: unweightedGpa.toFixed(2),
+      totalCredits,
+      qualityPoints: totalWeightedGradePoints.toFixed(1),
+      unweightedQualityPoints: totalUnweightedGradePoints.toFixed(1)
+    };
+  };
+
+  const totals = getTotals();
+  const currentAccent = INK_ACCENTS.find((p) => p.name === activeAccent) || INK_ACCENTS[0];
+
+  // Target Graduation Calculations
+  const targetDiffGpa = parseFloat(targetGpa);
+  const targetDiffCredits = parseInt(targetCredits) || 120;
+  const currentCompletedCredits = totals.totalCredits;
+  const currentGpaVal = parseFloat(totals.gpa);
+  const currentQualityPoints = parseFloat(totals.qualityPoints);
+
+  const remainingCredits = Math.max(0, targetDiffCredits - currentCompletedCredits);
+  const totalQualityPointsRequired = targetDiffGpa * targetDiffCredits;
+  const remainingQualityPointsRequired = Math.max(0, totalQualityPointsRequired - currentQualityPoints);
+  const neededAverageGpaOnRemaining = remainingCredits === 0 ? 0 : remainingQualityPointsRequired / remainingCredits;
+
+  // Semester / Term Operations
+  const handleAddTerm = () => {
+    const nextTermNum = terms.length + 1;
+    const newCourse: Course = {
+      id: `course-${nextTermNum}-1`,
+      category: "Core Subjects",
+      courseName: "",
+      score: "",
+      credit: ""
+    };
+    const newTerm: Term = {
+      id: `term-${Date.now()}`,
+      title: `Semester ${nextTermNum}`,
+      courses: [newCourse],
+      reflection: "",
+      bullets: []
+    };
+    const updated = [...terms, newTerm];
+    syncTerms(updated);
+  };
+
+  const handleDeleteTerm = (termId: string) => {
+    showConfirm("Are you sure you want to delete this semester and all of its course records?", () => {
+      const updated = terms.filter((t) => t.id !== termId);
+      syncTerms(updated);
+    });
+  };
+
+  const handleUpdateTermTitle = (termId: string, newTitle: string) => {
+    const updated = terms.map((t) => (t.id === termId ? { ...t, title: newTitle } : t));
+    syncTerms(updated);
+  };
+
+  const handleUpdateTermReflection = (termId: string, newText: string) => {
+    const updated = terms.map((t) => (t.id === termId ? { ...t, reflection: newText } : t));
+    syncTerms(updated);
+  };
+
+  const handleAddBulletMemory = (termId: string) => {
+    const bulletText = bulletInputs[termId]?.trim();
+    if (!bulletText) return;
+
+    const updated = terms.map((t) => {
+      if (t.id === termId) {
+        return {
+          ...t,
+          bullets: [...t.bullets, bulletText]
+        };
+      }
+      return t;
+    });
+
+    syncTerms(updated);
+    setBulletInputs({ ...bulletInputs, [termId]: "" });
+  };
+
+  const handleDeleteBulletMemory = (termId: string, bulletIdx: number) => {
+    const updated = terms.map((t) => {
+      if (t.id === termId) {
+        return {
+          ...t,
+          bullets: t.bullets.filter((_, i) => i !== bulletIdx)
+        };
+      }
+      return t;
+    });
+    syncTerms(updated);
+  };
+
+  // Course Specific Operations
+  const handleAddCourseToTerm = (termId: string) => {
+    const updated = terms.map((t) => {
+      if (t.id === termId) {
+        const nextCourseNum = t.courses.length + 1;
+        const newCourse: Course = {
+          id: `course-${termId}-${Date.now()}-${nextCourseNum}`,
+          category: Object.keys(predefinedCourseCategories)[0],
+          courseName: "",
+          score: "",
+          credit: ""
+        };
+        return {
+          ...t,
+          courses: [...t.courses, newCourse]
+        };
+      }
+      return t;
+    });
+    syncTerms(updated);
+  };
+
+  const handleDeleteCourse = (termId: string, courseId: string) => {
+    const updated = terms.map((t) => {
+      if (t.id === termId) {
+        return {
+          ...t,
+          courses: t.courses.filter((c) => c.id !== courseId)
+        };
+      }
+      return t;
+    });
+    syncTerms(updated);
+  };
+
+  const handleUpdateCourseField = (
+    termId: string,
+    courseId: string,
+    field: keyof Course,
+    value: string
+  ) => {
+    const updated = terms.map((t) => {
+      if (t.id === termId) {
+        return {
+          ...t,
+          courses: t.courses.map((c) => (c.id === courseId ? { ...c, [field]: value } : c))
+        };
+      }
+      return t;
+    });
+    syncTerms(updated);
+  };
+
+  const handleUpdateCourseFields = (
+    termId: string,
+    courseId: string,
+    updates: Partial<Course>
+  ) => {
+    const updated = terms.map((t) => {
+      if (t.id === termId) {
+        return {
+          ...t,
+          courses: t.courses.map((c) => (c.id === courseId ? { ...c, ...updates } : c))
+        };
+      }
+      return t;
+    });
+    syncTerms(updated);
+  };
+
+  const handleSelectAutocompleteValue = (
+    termId: string,
+    courseId: string,
+    value: string
+  ) => {
+    handleUpdateCourseField(termId, courseId, "courseName", value);
+    setActiveSuggestionBox(null);
+  };
+
+  // Reset functionality
+  const handleResetDashboard = () => {
+    showConfirm("Are you sure you want to reset everything? This will clear all semester structures, written reflections, local snapshots, and target settings.", () => {
+      localStorage.removeItem("gpaTracker_terms");
+      localStorage.removeItem("gpaTracker_snapshots");
+      localStorage.removeItem("gpaTracker_targetGpa");
+      localStorage.removeItem("gpaTracker_targetCredits");
+      localStorage.removeItem("gpaTracker_personalMotivator");
+      localStorage.removeItem("gpaTracker_customCategories");
+      localStorage.removeItem("gpaTracker_accent");
+      
+      setSnapshots([]);
+      setCustomCategories([]);
+      setActiveAccent("Charcoal Ink");
+      setTargetGpa("3.80");
+      setTargetCredits("120");
+      setPersonalMotivator("To build a strong academic foundation, reflect on my progress, and prepare for graduation.");
+      setGlobalMentorAdvice("");
+      
+      writeDefaultTerms();
+      setShowIntro(true);
+      localStorage.setItem("gpaTracker_showIntro", "true");
+    });
+  };
+
+  // Local Snapshots Operations
+  const handleSaveSnapshot = () => {
+    const timestampStr = new Date().toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    });
+
+    const newSnapshot: GpaSnapshot = {
+      id: `snapshot-${Date.now()}`,
+      timestamp: timestampStr,
+      gpa: totals.gpa,
+      totalCredits: totals.totalCredits,
+      qualityPoints: parseFloat(totals.qualityPoints),
+      note: snapshotNote.trim() || `Milestone Backup`,
+      terms: JSON.parse(JSON.stringify(terms)) // deep copy coursework terms
+    };
+
+    const updated = [newSnapshot, ...snapshots];
+    setSnapshots(updated);
+    localStorage.setItem("gpaTracker_snapshots", JSON.stringify(updated));
+    setSnapshotNote("");
+    setIsSnapshotModalOpen(false);
+    showAlert("Academic snapshot saved successfully! You can find it listed in your Snapshot ledger below.");
+  };
+
+  const handleDeleteSnapshot = (snapshotId: string) => {
+    showConfirm("Delete this local snapshot record? This cannot be undone.", () => {
+      const updated = snapshots.filter((s) => s.id !== snapshotId);
+      setSnapshots(updated);
+      localStorage.setItem("gpaTracker_snapshots", JSON.stringify(updated));
+    });
+  };
+
+  const handleRestoreSnapshot = (snapshot: GpaSnapshot) => {
+    showConfirm(`Do you want to restore snapshot from ${snapshot.timestamp}? It has a GPA of ${snapshot.gpa}. Warning: This will overwrite your current active board. We suggest taking a snapshot backup of your current active board first!`, () => {
+      if (snapshot.terms && snapshot.terms.length > 0) {
+        syncTerms(snapshot.terms);
+        showAlert(`Snapshot restored successfully! Loaded ${snapshot.terms.length} semesters with a cumulative GPA of ${snapshot.gpa}.`);
+      } else {
+        showAlert("Note: This legacy snapshot is missing course records and only stored high-level metrics. Please import a file to reload older reports.");
+      }
+    });
+  };
+
+  // Export / Download File Logic
+  const handleDownloadFile = () => {
+    let fileContent = "";
+    let fileName = "gpa_track_report";
+
+    if (exportFormat === "csv") {
+      let csvRows = ["Term Name,Category,Course Name,Score,Credit Hours"];
+
+      terms.forEach((term) => {
+        term.courses.forEach((course) => {
+          const cat = course.category.replace(/"/g, '""');
+          const name = course.courseName.replace(/"/g, '""');
+          const score = course.score;
+          const cred = course.credit;
+          csvRows.push(`"${term.title}","${cat}","${name}","${score}","${cred}"`);
+        });
+      });
+
+      csvRows.push(`,,,GPA,${totals.gpa}`);
+      fileContent = "data:text/csv;charset=utf-8," + encodeURIComponent(csvRows.join("\r\n"));
+      fileName += ".csv";
+    } else {
+      // Plain text report
+      terms.forEach((term) => {
+        fileContent += `\n=== ${term.title} ===\n`;
+        if (term.reflection) {
+          fileContent += `Reflection: ${term.reflection}\n`;
+        }
+        if (term.bullets.length > 0) {
+          fileContent += `Memories & Highlights:\n`;
+          term.bullets.forEach((b) => {
+            fileContent += `- ${b}\n`;
+          });
+        }
+        fileContent += `Courses:\n`;
+        term.courses.forEach((row) => {
+          fileContent += `${row.category} | ${row.courseName || "General"}: ${row.score}% (${row.credit} cr)\n`;
+        });
+      });
+
+      fileContent += `\nFINAL CUMULATIVE GPA: ${totals.gpa}\nTOTAL CREDITS COMPLETED: ${totals.totalCredits}\n`;
+      fileContent = "data:text/plain;charset=utf-8," + encodeURIComponent(fileContent);
+      fileName += ".txt";
+    }
+
+    const link = document.createElement("a");
+    link.setAttribute("href", fileContent);
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setIsExportModelOpen(false);
+  };
+
+  // Import Upload File Logic
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      const contents = e.target?.result as string;
+      const lines = contents.trim().split(/\r?\n/);
+      let importedCount = 0;
+
+      let isNewFormat = false;
+      if (lines.length > 0 && lines[0].toLowerCase().includes("term name")) {
+        isNewFormat = true;
+        lines.shift(); // Remove headers
+      } else if (lines.length > 0 && lines[0].toLowerCase().includes("coursecategory")) {
+        lines.shift();
+      }
+
+      // Track terms
+      let termsMap: Record<string, Term> = {};
+      let termsArray: Term[] = [];
+
+      lines.forEach((line, idx) => {
+        let parts: string[] = [];
+        let inQuotes = false;
+        let current = "";
+
+        for (let i = 0; i < line.length; i++) {
+          if (line[i] === '"') {
+            inQuotes = !inQuotes;
+            continue;
+          }
+          if (line[i] === "," && !inQuotes) {
+            parts.push(current.trim());
+            current = "";
+            continue;
+          }
+          current += line[i];
+        }
+        parts.push(current.trim());
+
+        if (parts.length < 4 && line.includes(",")) {
+          parts = line.split(",").map((p) => p.trim());
+        }
+
+        // Logic for New Format (5 columns: Term, Category, Name, Score, Credit)
+        if (isNewFormat && parts.length >= 5) {
+          const termName = parts[0];
+          const cat = parts[1];
+          const name = parts[2];
+          const scoreStr = parts[3];
+          const creditStr = parts[4];
+
+          if (termName) {
+            if (!termsMap[termName]) {
+              const newTerm: Term = {
+                id: `term-${Date.now()}-${idx}`,
+                title: termName,
+                courses: [],
+                reflection: "",
+                bullets: []
+              };
+              termsMap[termName] = newTerm;
+              termsArray.push(newTerm);
+            }
+
+            const scoreNum = parseFloat(scoreStr);
+            const creditNum = parseFloat(creditStr);
+
+            if (!isNaN(scoreNum) || !isNaN(creditNum) || name) {
+              termsMap[termName].courses.push({
+                id: `course-${Date.now()}-${idx}-${Math.random()}`,
+                category: cat || "Core Subjects",
+                courseName: name,
+                score: scoreStr,
+                credit: creditStr
+              });
+              importedCount++;
+            }
+          }
+        }
+        // Old 4-column legacy format loader
+        else if (!isNewFormat && parts.length >= 4) {
+          const cat = parts[0];
+          const name = parts[1];
+          const scoreStr = parts[2];
+          const creditStr = parts[3];
+
+          const defaultTermName = "Semester 1";
+          if (!termsMap[defaultTermName]) {
+            const newTerm: Term = {
+              id: `term-${Date.now()}-${idx}`,
+              title: defaultTermName,
+              courses: [],
+              reflection: "",
+              bullets: []
+            };
+            termsMap[defaultTermName] = newTerm;
+            termsArray.push(newTerm);
+          }
+
+          termsMap[defaultTermName].courses.push({
+            id: `course-${Date.now()}-${idx}-${Math.random()}`,
+            category: cat || "Core Subjects",
+            courseName: name,
+            score: scoreStr,
+            credit: creditStr
+          });
+          importedCount++;
+        }
+      });
+
+      if (termsArray.length > 0) {
+        // Enforce that all terms have at least one course rows
+        termsArray.forEach((t) => {
+          if (t.courses.length === 0) {
+            t.courses.push({
+              id: `course-empty-${t.id}`,
+              category: "Core Subjects",
+              courseName: "",
+              score: "",
+              credit: ""
+            });
+          }
+        });
+        syncTerms(termsArray);
+        showAlert(`Success! Successfully loaded ${importedCount} courses spread across ${termsArray.length} semesters.`);
+      } else {
+        showAlert("No valid coursework data detected in the file.");
+      }
+    };
+
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  // AI Mentor server endpoint fetcher
+  const handleConsultGlobalMentorInfo = async () => {
+    setIsGeneratingMentorAdvice(true);
+    setGlobalMentorAdvice("");
+    try {
+      const response = await fetch("/api/mentor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terms,
+          cumulativeGpa: totals.gpa,
+          totalCredits: totals.totalCredits,
+        }),
+      });
+      const data = await response.json();
+      setGlobalMentorAdvice(data.text || "No response received.");
+    } catch (e) {
+      console.error(e);
+      setGlobalMentorAdvice("Unable to connect to your local academic advisor service right now. Please refresh and try again.");
+    } finally {
+      setIsGeneratingMentorAdvice(false);
+    }
+  };
+
+  const handleConsultSemesterMentorInfo = async (termId: string) => {
+    setIsGeneratingSemesterAdvice({ ...isGeneratingSemesterAdvice, [termId]: true });
+    
+    // Pick just this singular term context
+    const singleTerm = terms.filter((t) => t.id === termId);
+    try {
+      const response = await fetch("/api/mentor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          terms: singleTerm,
+          cumulativeGpa: totals.gpa,
+          totalCredits: totals.totalCredits,
+        }),
+      });
+      const data = await response.json();
+      
+      const updated = terms.map((t) => {
+        if (t.id === termId) {
+          return { ...t, aiAdvice: data.text };
+        }
+        return t;
+      });
+      syncTerms(updated);
+    } catch (e) {
+      console.error(e);
+      showAlert("Consultation failed. Make sure your local workspace server is active.");
+    } finally {
+      setIsGeneratingSemesterAdvice({ ...isGeneratingSemesterAdvice, [termId]: false });
+    }
+  };
+
+  const toggleHomeView = (val: boolean) => {
+    setShowIntro(val);
+    localStorage.setItem("gpaTracker_showIntro", String(val));
+  };
+
+  if (!completedHydration) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#f6f6f8]">
+        <div className="text-center">
+          <div className="animate-spin text-primary text-5xl mb-4">⌛</div>
+          <p className="text-slate-600 font-medium">Securing local memories database...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="font-sans text-[#1A1A1A] antialiased relative overflow-x-hidden min-h-screen selection:bg-[#1A1A1A] selection:text-white">
+
+      <div className="relative z-10 flex flex-col h-full min-h-screen">
+        {/* Navbar */}
+        <nav className="w-full px-4 lg:px-8 py-4">
+          <div className="max-w-7xl mx-auto glass-panel rounded-2xl px-6 py-3.5 flex items-center justify-between border border-[#1A1A1A]/10">
+            <div className="flex items-center gap-3">
+              <div className="bg-[#1A1A1A] p-2 rounded-xl text-white flex items-center justify-center">
+                <span className="material-symbols-outlined text-2xl">school</span>
+              </div>
+              <div>
+                <span className="text-sm font-bold uppercase tracking-[0.1em] text-[#1A1A1A] block leading-none">
+                  GPA Calculator
+                </span>
+                <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest block mt-1">
+                  & Memoir Journal
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Back to intro/app toggle */}
+              <button
+                onClick={() => toggleHomeView(!showIntro)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#1A1A1A] hover:bg-[#1A1A1A]/5 border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/10 rounded-lg transition-all"
+                id="btnToggleView"
+              >
+                <span className="material-symbols-outlined text-[16px]">
+                  {showIntro ? "dashboard" : "home"}
+                </span>
+                <span>{showIntro ? "Enter Tracker" : "Memoir Hub"}</span>
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-3 py-2 text-xs uppercase tracking-wider font-semibold text-slate-700 bg-white/40 hover:bg-white rounded-xl transition-all border border-[#1A1A1A]/10 shadow-none"
+                id="importBtn"
+              >
+                <span className="material-symbols-outlined text-[18px]">upload</span>
+                <span className="hidden sm:inline">Import</span>
+              </button>
+
+              <button
+                onClick={() => setIsExportModelOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white text-xs uppercase tracking-[0.25em] font-bold rounded-xl transition-all shadow-none"
+                id="exportBtn"
+              >
+                <span className="material-symbols-outlined text-[20px]">ios_share</span>
+                <span>Export</span>
+              </button>
+            </div>
+          </div>
+        </nav>
+
+        {/* Hidden File Input for Import */}
+        <input
+          type="file"
+          id="fileInput"
+          ref={fileInputRef}
+          accept=".csv,.txt"
+          onChange={handleImportFile}
+          style={{ display: "none" }}
+        />
+
+        {/* Dynamic Transition Between Screens */}
+        <AnimatePresence mode="wait">
+          {showIntro ? (
+            /* ==============================================
+               1. INTRO / WELCOME & MEMORIES Hub VIEW
+               ============================================== */
+            <motion.main
+              key="intro-screen"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.3 }}
+              className="flex-grow w-full max-w-7xl mx-auto px-4 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start pb-24"
+              id="introView"
+            >
+              {/* Column 1: Core Action & Stats Brief (lg:col-span-5) */}
+              <div className="lg:col-span-5 flex flex-col gap-6">
+                
+                {/* Clean Hero Presentation */}
+                <div className="glass-panel rounded-2xl p-8 flex flex-col items-center text-center relative overflow-hidden border border-[#1A1A1A]/10">
+                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded mb-4 uppercase tracking-[0.15em]">
+                    Local Device Sync
+                  </span>
+                  <h1 className="text-[#1A1A1A] font-light leading-[1.0] tracking-tighter mb-4" style={{ fontFamily: "Georgia, serif", fontSize: "3rem" }}>
+                    Memories <br/>Stored <br/>
+                    <span className="italic font-normal">Local.</span>
+                  </h1>
+                  <p className="text-sm leading-relaxed max-w-sm mb-6 text-slate-650">
+                    Your academic data never leaves this machine. A sovereign digital ledger designed for private GPA tracking and semester reflection entries.
+                  </p>
+
+                  <div className="flex flex-col gap-2.5 w-full">
+                    <button
+                      onClick={() => toggleHomeView(false)}
+                      className="w-full py-4 bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white text-xs uppercase tracking-[0.2em] font-bold rounded transition-all flex items-center justify-center gap-2"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">dashboard</span>
+                      <span>Enter Tracker</span>
+                    </button>
+                    
+                    <button
+                      onClick={handleResetDashboard}
+                      className="text-[9px] uppercase tracking-[0.15em] font-bold text-red-500 hover:text-red-700 hover:bg-red-50/50 py-1.5 px-3 rounded transition-colors self-center mt-2"
+                    >
+                      Reset Memories Database
+                    </button>
+                  </div>
+                </div>
+
+                {/* Local Stats Achievement Snapshot */}
+                <div className="glass-panel rounded-2xl p-6 border border-[#1A1A1A]/10">
+                  <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.2em] mb-4 border-b border-[#1A1A1A]/10 pb-2.5 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[#1A1A1A] text-[18px]">workspace_premium</span>
+                    <span>Device Record Overview</span>
+                  </h3>
+                  
+                  <div className="grid grid-cols-3 gap-3 text-center mb-4">
+                    <div className="bg-white/50 p-3 rounded border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/15 transition-colors">
+                      <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Active GPA</span>
+                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.gpa}</span>
+                    </div>
+                    <div className="bg-white/50 p-3 rounded border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/15 transition-colors">
+                      <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Semesters</span>
+                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{terms.length}</span>
+                    </div>
+                    <div className="bg-white/50 p-3 rounded border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/15 transition-colors">
+                      <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Credits</span>
+                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.totalCredits}</span>
+                    </div>
+                  </div>
+
+                  {/* Graduation Goal Forecast Tool */}
+                  <div className="p-4 bg-white/30 border border-[#1A1A1A]/10 rounded">
+                    <h4 className="text-[10px] font-bold text-[#1A1A1A] uppercase tracking-[0.2em] mb-3 flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px]">crisis_line</span>
+                      <span>Graduation Forecaster</span>
+                    </h4>
+
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Target GPA</label>
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0.0"
+                          max="4.33"
+                          value={targetGpa}
+                          onChange={(e) => syncTargetGpa(e.target.value)}
+                          className="w-full text-xs font-bold text-[#1A1A1A] bg-white border border-[#1A1A1A]/10 focus:outline-none focus:border-[#1A1A1A] p-2 rounded"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Target Credits</label>
+                        <input
+                          type="number"
+                          value={targetCredits}
+                          onChange={(e) => syncTargetCredits(e.target.value)}
+                          className="w-full text-xs font-bold text-[#1A1A1A] bg-white border border-[#1A1A1A]/10 focus:outline-none focus:border-[#1A1A1A] p-2 rounded"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-slate-650 space-y-1.5 border-t border-[#1A1A1A]/10 pt-2.5 font-mono">
+                      <div className="flex justify-between">
+                        <span>Credits Remaining:</span>
+                        <span className="font-bold">{remainingCredits} cr</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Required Average:</span>
+                        <span className="font-bold">
+                          {neededAverageGpaOnRemaining <= 0
+                            ? "Completed! 🎉"
+                            : neededAverageGpaOnRemaining > 4.33
+                            ? "Off Scale (Limit 4.33) ⚠️"
+                            : `${neededAverageGpaOnRemaining.toFixed(2)}`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Personal Motivation Card */}
+                <div className="glass-panel rounded-2xl p-6 border border-[#1A1A1A]/10">
+                  <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]">favorite</span>
+                    <span>Academic Mission</span>
+                  </h3>
+                  <textarea
+                    value={personalMotivator}
+                    onChange={(e) => syncPersonalMotivator(e.target.value)}
+                    placeholder="Provide your main driving force or long-term objective here..."
+                    className="w-full h-24 p-3 text-xs text-slate-605 bg-white border border-[#1A1A1A]/10 rounded focus:border-[#1A1A1A] resize-none focus:outline-none placeholder-slate-400"
+                  />
+                  <div className="flex justify-between items-center text-[10px] uppercase tracking-widest opacity-40 mt-2 font-mono">
+                    <span>DB Status: Ready</span>
+                    <span>Local Cookie Encryption</span>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Column 2: Memory Snapshots & Reflections Timeline (lg:col-span-8) */}
+              <div className="lg:col-span-7 flex flex-col gap-6">
+                
+                {/* AI Advisor Global Auditor */}
+                <div className="glass-panel rounded-2xl p-6 border border-[#1A1A1A]/10">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-[#1A1A1A] p-2 rounded text-white flex items-center justify-center">
+                        <span className="material-symbols-outlined text-xl">auto_awesome</span>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-[#1A1A1A] text-sm uppercase tracking-[0.1em]">Memories Advisor</h3>
+                        <p className="text-[10px] text-slate-500 uppercase tracking-widest">Global Academic Ledger Auditor</p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleConsultGlobalMentorInfo}
+                      disabled={isGeneratingMentorAdvice}
+                      className={`px-4 py-2 bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white text-[11px] font-bold uppercase tracking-[0.15em] rounded transition-all flex items-center gap-1.5 ${
+                        isGeneratingMentorAdvice ? "opacity-60 cursor-not-allowed animate-pulse" : ""
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[15px]">science</span>
+                      <span>{isGeneratingMentorAdvice ? "Auditing..." : "Audit Ledger"}</span>
+                    </button>
+                  </div>
+
+                  {globalMentorAdvice ? (
+                    <div className="p-4 bg-white border border-[#1A1A1A]/10 rounded prose text-slate-700 text-xs leading-relaxed max-h-[300px] overflow-y-auto whitespace-pre-wrap font-sans">
+                      {globalMentorAdvice}
+                    </div>
+                  ) : (
+                    <div className="p-10 border border-dashed border-[#1A1A1A]/10 rounded text-center text-slate-400">
+                      <span className="material-symbols-outlined text-3xl text-slate-300 block mb-2">consultant</span>
+                      <p className="text-xs font-semibold">Ready to Auditing</p>
+                      <p className="text-[10px] mt-1 max-w-xs mx-auto">Click &quot;Audit Ledger&quot; to let secure server-side AI analyze your combined semesters, GPAs, and reflections.</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Timeline Journal of Reflections & Achievements */}
+                <div className="glass-panel rounded-2xl p-6 border border-[#1A1A1A]/10">
+                  <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[20px]">book</span>
+                    <span>Academic Memory Archival</span>
+                  </h3>
+
+                  <div className="space-y-6 relative border-l border-[#1A1A1A]/10 ml-4 pl-6 py-2">
+                    {terms.map((term, idx) => (
+                      <div key={term.id} className="relative group/timeline">
+                        {/* Timeline Elegant Index */}
+                        <div className="absolute -left-[35px] top-0 text-[#1A1A1A]/20 text-xl font-light italic w-6 h-6 flex items-center justify-center" style={{ fontFamily: "Georgia, serif" }}>
+                          0{idx + 1}
+                        </div>
+
+                        <div className="bg-white border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/10 p-5 rounded transition-all">
+                          <div className="flex items-baseline justify-between mb-2">
+                            <h4 className="font-bold text-[#1A1A1A] text-sm uppercase tracking-wider">{term.title || `Semester ${idx + 1}`}</h4>
+                            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest pb-0.5 border-b border-[#1A1A1A]/10">
+                              {term.courses.length} courses
+                            </span>
+                          </div>
+
+                          {/* Reflections info */}
+                          {term.reflection ? (
+                            <p className="text-xs text-slate-600 italic mt-3 border-l border-[#1A1A1A]/10 pl-3 leading-relaxed">
+                              &ldquo;{term.reflection}&rdquo;
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-slate-400 italic mt-2.5">
+                              No reflective entry written for this period. Enter Grade Dashboard to record highlights.
+                            </p>
+                          )}
+
+                          {/* Bullet points memory achievements */}
+                          {term.bullets && term.bullets.length > 0 && (
+                            <div className="mt-4 pt-3 border-t border-[#1A1A1A]/5">
+                              <span className="text-[9px] font-mono text-slate-400 block mb-2 uppercase tracking-wider">
+                                Highpoints & Milestones:
+                              </span>
+                              <ul className="space-y-1.5">
+                                {term.bullets.map((bullet, bIdx) => (
+                                  <li key={bIdx} className="text-xs text-slate-650 flex items-start gap-2">
+                                    <span className="text-slate-400 mt-1.5 text-[6px]">&#9632;</span>
+                                    <span>{bullet}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Snapshots database list */}
+                <div className="glass-panel rounded-2xl p-6 border border-[#1A1A1A]/10">
+                  <div className="mb-4">
+                    <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.2em] flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[20px]">restore</span>
+                      <span>Milestone Backups</span>
+                    </h3>
+                  </div>
+
+                  {snapshots.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {snapshots.map((item) => (
+                        <div
+                          key={item.id}
+                          className="bg-white border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/10 p-4 rounded flex flex-col justify-between transition-all"
+                        >
+                          <div>
+                            <div className="flex justify-between items-start border-b border-[#1A1A1A]/5 pb-2 mb-2">
+                              <span className="text-[9px] font-mono text-slate-400">
+                                {item.timestamp}
+                              </span>
+                              <button
+                                onClick={() => handleDeleteSnapshot(item.id)}
+                                className="text-red-500 hover:text-red-700 text-[10px] font-bold uppercase tracking-wider bg-transparent cursor-pointer"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                            <h4 className="text-xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                              GPA {item.gpa}
+                            </h4>
+                            <div className="text-[9px] font-mono text-slate-500 mt-1 uppercase tracking-wider">
+                              Credits: {item.totalCredits} &bull; Quality Pts: {item.qualityPoints}
+                            </div>
+                            <p className="text-xs text-slate-600 bg-[#F2F0ED]/50 p-2.5 rounded border border-[#1A1A1A]/5 mt-3 leading-relaxed">
+                              &ldquo;{item.note}&rdquo;
+                            </p>
+                          </div>
+                          
+                          <button
+                            onClick={() => handleRestoreSnapshot(item)}
+                            className="w-full mt-4 py-2 border border-[#1A1A1A]/10 hover:border-[#1A1A1A] text-[#1A1A1A] hover:bg-[#1A1A1A]/5 text-[10px] font-bold uppercase tracking-widest rounded transition-all"
+                          >
+                            Restore Target Scenario
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-8 border border-dashed border-[#1A1A1A]/10 rounded text-center text-slate-400">
+                      <span className="material-symbols-outlined text-2xl block mb-2 text-slate-300">save_as</span>
+                      <p className="text-xs font-semibold">No backup snapshots registered</p>
+                      <p className="text-[10px] text-slate-400 mt-1 max-w-xs mx-auto">
+                        Commit milestone restore points inside the Grade Dashboard to compare different scenarios safely.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            </motion.main>
+          ) : (
+            /* ==============================================
+               2. MAIN GPA TRACKER DASHBOARD VIEW
+               ============================================== */
+            <motion.main
+              key="dashboard-screen"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.3 }}
+              className="flex-grow w-full max-w-7xl mx-auto px-4 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start pb-24"
+              id="dashboardView"
+            >
+              {/* LEFT COLUMN: Sticky Hero Stats & Grading Scale Table */}
+              <section className="lg:col-span-5 lg:sticky lg:top-28 flex flex-col gap-6">
+                
+                {/* Main GPA Display Card */}
+                <div className="glass-panel rounded-2xl p-8 flex flex-col items-center text-center relative overflow-hidden border border-[#1A1A1A]/10">
+                  <h1 className="text-7xl lg:text-8xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                    {totals.gpa}
+                  </h1>
+                  <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">Weighted GPA</p>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Unweighted GPA &bull; <span style={{ color: currentAccent.color }}>{totals.unweightedGpa}</span>
+                  </div>
+
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-2 gap-4 w-full mt-6">
+                    <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
+                      <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Total Credits</span>
+                      <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>{totals.totalCredits}</span>
+                    </div>
+                    <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
+                      <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Quality Points</span>
+                      <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.qualityPoints}</span>
+                    </div>
+                  </div>
+
+                  <hr className="w-full border-[#1A1A1A]/10 my-5" />
+
+                  {/* Options: Take Local Snapshot Backups */}
+                  <button
+                    onClick={() => setIsSnapshotModalOpen(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white font-bold rounded text-[10px] uppercase tracking-[0.15em] transition-all"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">save</span>
+                    <span>Commit Live GPA Snapshot</span>
+                  </button>
+                </div>
+
+                {/* Grading Scale Table UI */}
+                <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10">
+                  <div className="flex items-center gap-2 mb-4 border-b border-[#1A1A1A]/10 pb-3">
+                    <div className="bg-[#1A1A1A]/5 p-1.5 rounded text-[#1A1A1A] flex items-center justify-center">
+                      <span className="material-symbols-outlined text-[20px]">analytics</span>
+                    </div>
+                    <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]">Grading Scale (4.33)</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left text-slate-600">
+                      <thead className="text-[10px] text-slate-500 uppercase bg-[#F2F0ED]/50">
+                        <tr>
+                          <th className="px-3 py-2 rounded-l" scope="col">Range %</th>
+                          <th className="px-3 py-2 rounded-r text-right" scope="col">Points</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#1A1A1A]/5">
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">97.1 - 100%</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">4.33</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">94 - 97%</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">4.00</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">91 - 93%</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.63</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">88 - 90%</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.33</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">83 - 87%</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.00</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">81 - 83%</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.63</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">77 - 80%</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.33</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">Below 60%</td>
+                          <td className="px-3 py-2 text-right font-bold text-red-650">0.00</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <button
+                    onClick={() => setIsScaleModalOpen(true)}
+                    className="w-full mt-3 text-[10px] uppercase tracking-wider text-center text-slate-500 hover:text-[#1A1A1A] transition-colors focus:outline-none"
+                  >
+                    View All Ranges
+                  </button>
+                </div>
+
+                {/* Academic Customization Card */}
+                <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10 mt-6 animate-fade-in">
+                  <div className="flex items-center gap-2 mb-4 border-b border-[#1A1A1A]/10 pb-3">
+                    <div className="bg-[#1A1A1A]/5 p-1.5 rounded flex items-center justify-center" style={{ color: currentAccent.color }}>
+                      <span className="material-symbols-outlined text-[20px]">palette</span>
+                    </div>
+                    <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]" style={{ color: currentAccent.color }}>Academic Customizer</h3>
+                  </div>
+
+                  {/* 1. Theme selection */}
+                  <div className="mb-4">
+                    <label className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 block">Signature Style Ink</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {INK_ACCENTS.map((accent) => (
+                        <button
+                          key={accent.name}
+                          onClick={() => {
+                            setActiveAccent(accent.name);
+                            localStorage.setItem("gpaTracker_accent", accent.name);
+                          }}
+                          className={`flex items-center gap-1.5 p-2 rounded text-[10px] font-bold text-left border transition-all ${
+                            activeAccent === accent.name
+                              ? "bg-slate-50"
+                              : "border-transparent hover:border-[#1A1A1A]/10 bg-transparent text-slate-600"
+                          }`}
+                          style={{
+                            borderColor: activeAccent === accent.name ? currentAccent.color : "transparent",
+                          }}
+                        >
+                          <span
+                            className="w-2.5 h-2.5 rounded-full inline-block"
+                            style={{ backgroundColor: accent.color }}
+                          />
+                          <span style={{ color: activeAccent === accent.name ? currentAccent.color : "inherit" }}>
+                            {accent.name}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 2. Custom Category Addition */}
+                  <div className="pt-3 border-t border-[#1A1A1A]/5">
+                    <label className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 block">Create Customized Course Category</label>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const data = new FormData(e.currentTarget);
+                        const catName = (data.get("newCat") as string)?.trim();
+                        if (catName) {
+                          if (customCategories.includes(catName) || predefinedCourseCategories[catName]) {
+                            showAlert(`"${catName}" already exists!`);
+                            return;
+                          }
+                          const updated = [...customCategories, catName];
+                          setCustomCategories(updated);
+                          localStorage.setItem("gpaTracker_customCategories", JSON.stringify(updated));
+                          showAlert(`Created category: "${catName}"! You can now select it on any course row.`);
+                          e.currentTarget.reset();
+                        } else {
+                          showAlert("Please type a category name first.");
+                        }
+                      }}
+                      className="flex gap-2"
+                    >
+                      <input
+                        name="newCat"
+                        type="text"
+                        placeholder="e.g. Science Labs, IB Seminar"
+                        className="flex-grow p-2 text-xs border border-[#1A1A1A]/10 rounded bg-white focus:outline-none"
+                        style={{
+                          borderColor: "rgba(26,26,26,0.1)",
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        className="py-2 px-3 text-[10px] uppercase font-bold tracking-widest text-white rounded transition-all flex items-center justify-center cursor-pointer"
+                        style={{ backgroundColor: currentAccent.color }}
+                      >
+                        Add
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </section>
+
+              {/* RIGHT COLUMN: Course Inputs & Semesters */}
+              <section className="lg:col-span-7 flex flex-col gap-6 pb-20">
+                <header className="flex items-center justify-between px-2 pb-2 border-b border-[#1A1A1A]/10">
+                  <h2 className="text-[#1A1A1A] font-light italic text-4xl tracking-tight" style={{ fontFamily: "Georgia, serif" }}>
+                    My Courses
+                  </h2>
+                  <button
+                    onClick={handleResetDashboard}
+                    className="text-xs font-bold uppercase tracking-widest text-red-500 hover:text-red-700 transition-colors flex items-center gap-1 py-1.5 px-3 hover:bg-red-50 rounded focus:outline-none"
+                    id="resetBtn"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">delete_sweep</span> Reset
+                  </button>
+                </header>
+
+                {/* MAIN CONTAINER FOR SEMESTERS */}
+                <div id="allTermsContainer" className="flex flex-col gap-10">
+                  {terms.map((term, termIdx) => (
+                    <div key={term.id} className="term-block animate-fade-in py-1">
+                      
+                      {/* Term Header Layout */}
+                      <div className="flex items-center gap-2 mb-4 group relative">
+                        <input
+                          type="text"
+                          value={term.title}
+                          onChange={(e) => handleUpdateTermTitle(term.id, e.target.value)}
+                          className="termTitle text-xl font-light italic text-[#1A1A1A] bg-transparent border-0 border-b border-transparent focus:border-[#1A1A1A] focus:ring-0 p-0 transition-all"
+                          style={{ fontFamily: "Georgia, serif" }}
+                        />
+                        <span className="material-symbols-outlined text-slate-400 text-[18px] opacity-0 group-hover:opacity-100 transition-opacity">
+                          edit
+                        </span>
+
+                        <button
+                          onClick={() => handleDeleteTerm(term.id)}
+                          className="ml-auto text-[10px] font-bold uppercase tracking-wider text-red-500 hover:text-red-700 deleteTermBtn"
+                          style={{ display: terms.length === 1 && termIdx === 0 ? "none" : "block" }}
+                        >
+                          Delete Term
+                        </button>
+                      </div>
+
+                      {/* Course Card Grid Container */}
+                      <div className="course-list flex flex-col gap-4 mb-4">
+                        {term.courses.map((course) => {
+                          // Autocomplete suggestion filtering
+                          const inputValue = course.courseName.toLowerCase();
+                          const categoryList = predefinedCourseCategories[course.category] || [];
+                          const matchingSuggestions = categoryList.filter((suggestion) =>
+                            suggestion.toLowerCase().includes(inputValue)
+                          );
+
+                          const isAutocompleteActive =
+                            activeSuggestionBox?.termId === term.id &&
+                            activeSuggestionBox?.courseId === course.id &&
+                            inputValue.length > 0 &&
+                            matchingSuggestions.length > 0;
+
+                          return (
+                            <div
+                              key={course.id}
+                              className="glass-card rounded-xl p-5 flex flex-col md:flex-row gap-4 items-start md:items-center group animate-fade-in relative z-10"
+                            >
+                              {/* 1. Category Selector */}
+                              <div className="w-full md:w-[18%]">
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Category</label>
+                                <div className="relative">
+                                  <select
+                                    value={course.category}
+                                    onChange={(e) => {
+                                      handleUpdateCourseFields(term.id, course.id, {
+                                        category: e.target.value,
+                                        courseName: "" // reset name on category change
+                                      });
+                                    }}
+                                    className="courseCategory w-full modern-input rounded-lg text-xs font-semibold text-slate-700 py-2.5 pl-3 pr-8 appearance-none cursor-pointer focus:outline-none focus:border-[#1A1A1A] focus:ring-0"
+                                  >
+                                    {[...Object.keys(predefinedCourseCategories), ...customCategories].map((catName) => (
+                                      <option key={catName} value={catName}>
+                                        {catName}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                    <span className="material-symbols-outlined text-[18px]">expand_more</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* 2. Course Name with React Autocomplete Dropdown */}
+                              <div className="w-full md:w-[25%] relative">
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Course Name</label>
+                                <input
+                                  type="text"
+                                  className="courseName w-full modern-input rounded-lg text-xs font-semibold text-slate-750 placeholder-slate-400 py-2.5 px-3 focus:outline-none focus:border-[#1A1A1A] focus:ring-0"
+                                  placeholder="e.g. AP Calculus"
+                                  value={course.courseName}
+                                  onChange={(e) => {
+                                    handleUpdateCourseField(term.id, course.id, "courseName", e.target.value);
+                                    setActiveSuggestionBox({ termId: term.id, courseId: course.id });
+                                  }}
+                                  onFocus={() => {
+                                    setActiveSuggestionBox({ termId: term.id, courseId: course.id });
+                                  }}
+                                  onBlur={() => {
+                                    // Delay to let click on suggestions register beforehand
+                                    setTimeout(() => {
+                                      setActiveSuggestionBox(null);
+                                    }, 180);
+                                  }}
+                                />
+
+                                {/* Interactive autocomplete matches popup */}
+                                {isAutocompleteActive && (
+                                  <div className="autocomplete-dropdown block">
+                                    {matchingSuggestions.map((itemValue) => (
+                                      <div
+                                        key={itemValue}
+                                        onMouseDown={(e) => {
+                                          e.preventDefault(); // Prevents triggers from firing on blur
+                                          handleSelectAutocompleteValue(term.id, course.id, itemValue);
+                                        }}
+                                      >
+                                        {itemValue}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 3. Course Level Selector */}
+                              <div className="w-full md:w-[22%]">
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Course Level</label>
+                                <div className="relative">
+                                  <select
+                                    value={course.level || "Regular"}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      handleUpdateCourseFields(term.id, course.id, {
+                                        level: val as any,
+                                        weightBoost: val === "Regular" ? "0.0" : val === "Honors" ? "0.5" : val === "AP/IB" ? "1.0" : course.weightBoost || "0.0"
+                                      });
+                                    }}
+                                    className="courseLevel w-full modern-input rounded-lg text-xs font-semibold text-slate-705 py-2.5 pl-3 pr-8 appearance-none cursor-pointer focus:outline-none focus:border-[#1A1A1A] focus:ring-0"
+                                  >
+                                    <option value="Regular">Regular (+0.0)</option>
+                                    <option value="Honors">Honors (+0.5)</option>
+                                    <option value="AP/IB">AP / IB (+1.0)</option>
+                                    <option value="Custom">Custom Boost...</option>
+                                  </select>
+                                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                    <span className="material-symbols-outlined text-[18px]">expand_more</span>
+                                  </div>
+                                </div>
+                                {course.level === "Custom" && (
+                                  <div className="mt-1">
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      placeholder="Boost e.g. 0.7"
+                                      className="courseBoost w-full p-1 bg-white border border-[#1A1A1A]/10 rounded text-[10px] font-bold text-slate-700 outline-none focus:border-[#1A1A1A]"
+                                      value={course.weightBoost || ""}
+                                      onChange={(e) => handleUpdateCourseField(term.id, course.id, "weightBoost", e.target.value)}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 4. Score Input (0-100) */}
+                              <div className="w-full md:w-[13%]">
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Score (%)</label>
+                                <input
+                                  type="number"
+                                  className="courseScore w-full modern-input rounded-lg text-xs font-bold text-[#1A1A1A] py-2.5 px-3 focus:outline-none focus:border-[#1A1A1A] focus:ring-0"
+                                  placeholder="0-100"
+                                  min="0"
+                                  max="100"
+                                  value={course.score}
+                                  onChange={(e) => handleUpdateCourseField(term.id, course.id, "score", e.target.value)}
+                                />
+                              </div>
+
+                              {/* 5. Credit hours entry */}
+                              <div className="w-full md:w-[13%]">
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Credits</label>
+                                <input
+                                  type="number"
+                                  className="courseCredit w-full modern-input rounded-lg text-xs font-semibold text-slate-700 py-2.5 px-3 focus:outline-none focus:border-[#1A1A1A] focus:ring-0"
+                                  placeholder="Cr"
+                                  min="0"
+                                  step="0.5"
+                                  value={course.credit}
+                                  onChange={(e) => handleUpdateCourseField(term.id, course.id, "credit", e.target.value)}
+                                />
+                              </div>
+
+                              {/* 6. Delete Row row button */}
+                              <button
+                                onClick={() => handleDeleteCourse(term.id, course.id)}
+                                className="deleteBtn p-2 mt-4 md:mt-0 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all md:self-center ml-auto md:ml-0 focus:outline-none"
+                              >
+                                <span className="material-symbols-outlined text-[20px]">delete</span>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Semester reflections & memories logs - LOCAL MEMORIES */}
+                      <div className="bg-white border border-[#1A1A1A]/10 rounded-xl p-5 mt-4 text-xs">
+                        <div className="flex items-center gap-1.5 font-bold text-[#1A1A1A] mb-2 uppercase tracking-[0.15em] text-[10px]">
+                          <span className="material-symbols-outlined text-[16px]">edit_note</span>
+                          <span>Reflection Memory & Milestones</span>
+                        </div>
+
+                        {/* Written reflective summary input */}
+                        <textarea
+                          placeholder="Type personal reflections, learnings, hurdles, or achievements for this semester..."
+                          value={term.reflection}
+                          onChange={(e) => handleUpdateTermReflection(term.id, e.target.value)}
+                          className="w-full p-2.5 bg-[#F2F0ED]/30 border border-[#1A1A1A]/10 rounded resize-none text-[12px] h-16 text-slate-700 focus:border-[#1A1A1A] focus:outline-none"
+                        />
+
+                        {/* Bullet point list achievements addition */}
+                        <div className="mt-4">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Key Highlights Log:</label>
+                          <div className="flex gap-2 mb-3">
+                            <input
+                              type="text"
+                              placeholder="e.g. Cleared AP Calc Midterm with 94%! Joined Spanish Club."
+                              value={bulletInputs[term.id] || ""}
+                              onChange={(e) => setBulletInputs({ ...bulletInputs, [term.id]: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleAddBulletMemory(term.id);
+                                }
+                              }}
+                              className="flex-grow bg-white border border-[#1A1A1A]/10 p-2 text-xs rounded focus:outline-none focus:border-[#1A1A1A]"
+                            />
+                            <button
+                              onClick={() => handleAddBulletMemory(term.id)}
+                              className="px-4 py-2 bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white rounded font-bold uppercase text-[10px] tracking-wider transition-all"
+                            >
+                              Add Log
+                            </button>
+                          </div>
+
+                          {term.bullets && term.bullets.length > 0 && (
+                            <div className="space-y-1 bg-[#F2F0ED]/30 border border-[#1A1A1A]/5 p-2 rounded">
+                              {term.bullets.map((bulletLine, bIdx) => (
+                                <div key={bIdx} className="flex justify-between items-center text-xs text-slate-650 bg-white py-1.5 px-3 rounded border border-[#1A1A1A]/5">
+                                  <span>{bulletLine}</span>
+                                  <button
+                                    onClick={() => handleDeleteBulletMemory(term.id, bIdx)}
+                                    className="text-red-500 hover:text-red-700 text-[10px] uppercase font-bold tracking-wider"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Smart AI mentoring recommendations specific to this sem */}
+                        <div className="mt-4 pt-4 border-t border-[#1A1A1A]/10">
+                          <button
+                            onClick={() => handleConsultSemesterMentorInfo(term.id)}
+                            disabled={isGeneratingSemesterAdvice[term.id]}
+                            className={`flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-[#1A1A1A] font-bold hover:opacity-80 transition-opacity ${
+                              isGeneratingSemesterAdvice[term.id] ? "animate-pulse" : ""
+                            }`}
+                          >
+                            <span className="material-symbols-outlined text-[16px]">science</span>
+                            <span>
+                              {isGeneratingSemesterAdvice[term.id]
+                                ? "Auditing Grades & Reflections..."
+                                : "Analyze Semester with AI Advisor"}
+                            </span>
+                          </button>
+
+                          {term.aiAdvice && (
+                            <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded mt-3 whitespace-pre-wrap leading-relaxed text-[11px] text-slate-700 font-sans prose">
+                              {term.aiAdvice}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Add Course to Term Button */}
+                      <button
+                        onClick={() => handleAddCourseToTerm(term.id)}
+                        className="addCourseToTermBtn mt-4 w-full py-3.5 rounded border border-dashed border-[#1A1A1A]/20 text-[#1A1A1A] hover:bg-[#1A1A1A]/5 hover:border-[#1A1A1A]/40 font-bold uppercase tracking-[0.2em] text-[10px] transition-all flex items-center justify-center gap-2 group focus:outline-none"
+                      >
+                        <span className="material-symbols-outlined text-[16px] group-hover:scale-115 transition-transform">add</span>
+                        Add Course to {term.title}
+                      </button>
+
+                      <hr className="my-8 border-[#1A1A1A]/10" />
+                    </div>
+                  ))}
+                </div>
+
+                {/* ADD SEMESTER BUTTON */}
+                <button
+                  onClick={handleAddTerm}
+                  className="w-full py-4 rounded border border-dashed border-[#1A1A1A]/20 bg-white text-[#1A1A1A] font-bold hover:bg-[#1A1A1A]/5 hover:border-[#1A1A1A]/40 transition-all flex items-center justify-center gap-2 group focus:outline-none uppercase tracking-[0.2em] text-[10px]"
+                  id="addTermBtn"
+                >
+                  <span className="material-symbols-outlined text-[20px]">calendar_add_on</span>
+                  Add New Semester
+                </button>
+              </section>
+            </motion.main>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* ========================================================
+         MODALS (Export, Full Scale, and Committing Snapshot)
+         ======================================================== */}
+
+      {/* Export Options Modal */}
+      {isExportModelOpen && (
+        <div className="modal block">
+          <div className="modal-content rounded-xl p-6 relative border border-[#1A1A1A]/10 shadow-lg">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#1A1A1A]/5">
+              <h2 className="text-sm font-bold uppercase tracking-[0.15em] text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>Export Options</h2>
+              <span
+                onClick={() => setIsExportModelOpen(false)}
+                className="cursor-pointer text-2xl text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                &times;
+              </span>
+            </div>
+            
+            <div className="flex flex-col gap-3 font-sans">
+              <label className="flex items-center gap-3 p-4 border border-[#1A1A1A]/10 rounded hover:bg-white cursor-pointer transition bg-white/40">
+                <input
+                  type="radio"
+                  name="exportFormat"
+                  value="csv"
+                  checked={exportFormat === "csv"}
+                  onChange={() => setExportFormat("csv")}
+                  className="text-[#1A1A1A] focus:ring-[#1A1A1A] w-5 h-5 bg-[#1A1A1A]"
+                />
+                <div className="flex flex-col">
+                  <span className="font-bold text-[#1A1A1A] text-xs uppercase tracking-wider">CSV Spreadsheet</span>
+                  <span className="text-[11px] text-[#1A1A1A]/70">Best for Excel or Google Sheets (Includes Semester name)</span>
+                </div>
+              </label>
+              
+              <label className="flex items-center gap-3 p-4 border border-[#1A1A1A]/10 rounded hover:bg-white cursor-pointer transition bg-white/40">
+                <input
+                  type="radio"
+                  name="exportFormat"
+                  value="txt"
+                  checked={exportFormat === "txt"}
+                  onChange={() => setExportFormat("txt")}
+                  className="text-[#1A1A1A] focus:ring-[#1A1A1A] w-5 h-5 bg-[#1A1A1A]"
+                />
+                <div className="flex flex-col">
+                  <span className="font-bold text-[#1A1A1A] text-xs uppercase tracking-wider">Plain Text Report</span>
+                  <span className="text-[11px] text-[#1A1A1A]/70">Fully readable journal of reflections and scores</span>
+                </div>
+              </label>
+            </div>
+
+            <button
+              onClick={handleDownloadFile}
+              className="mt-6 w-full bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white py-3 rounded font-bold uppercase tracking-[0.2em] transition-all text-[11px] text-center"
+            >
+              Download Report File
+            </button>
+          </div>
+        </div>
+      )}
+
+       {/* Scale Reference Modal */}
+      {isScaleModalOpen && (
+        <div className="modal block">
+          <div className="modal-content rounded-xl p-6 max-h-[85vh] overflow-y-auto relative border border-[#1A1A1A]/15 shadow-lg">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#1A1A1A]/10">
+              <h2 className="text-sm font-bold uppercase tracking-[0.15em] text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>Full GPA Boundaries</h2>
+              <span
+                onClick={() => setIsScaleModalOpen(false)}
+                className="cursor-pointer text-2xl text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                &times;
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">97.1 - 100%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">4.33</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">94 - 97%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">4.00</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">91 - 93%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.63</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">88 - 90%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.33</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">83.37 - 87%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.00</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">81 - 83%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">2.63</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">77 - 80%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">2.33</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">73 - 76%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">2.00</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">70 - 72%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">1.67</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">67 - 69%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">1.33</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">63 - 66%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">1.00</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">60 - 62%</div>
+              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">0.67</div>
+              
+              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">&lt; 60%</div>
+              <div className="p-3 bg-white text-red-650 font-bold rounded border border-[#1A1A1A]/10 text-center">0.00</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Snapshot Backup Notes Modal */}
+      {isSnapshotModalOpen && (
+        <div className="modal block">
+          <div className="modal-content rounded-xl p-6 relative border border-[#1A1A1A]/15 shadow-lg">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#1A1A1A]/10">
+              <h2 className="text-sm font-bold uppercase tracking-[0.15em] text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>Commit Backup Snapshot</h2>
+              <span
+                onClick={() => setIsSnapshotModalOpen(false)}
+                className="cursor-pointer text-2xl text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                &times;
+              </span>
+            </div>
+
+            <div className="mb-4">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Backup Identifier Notes</label>
+              <textarea
+                placeholder="Write a message for this milestone, e.g., 'Grade after AP Physics mid-term revisions'..."
+                value={snapshotNote}
+                onChange={(e) => setSnapshotNote(e.target.value)}
+                className="w-full p-2.5 bg-white border border-[#1A1A1A]/10 text-xs text-slate-700 rounded focus:border-[#1A1A1A] resize-none h-20 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setIsSnapshotModalOpen(false)}
+                className="w-1/2 py-2.5 text-[10px] uppercase font-bold tracking-widest text-[#1A1A1A] bg-white border border-[#1A1A1A]/10 hover:bg-slate-50 rounded transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveSnapshot}
+                className="w-1/2 py-2.5 text-[10px] uppercase font-bold tracking-widest text-white bg-[#1A1A1A] hover:bg-[#2C2C2C] rounded transition-all"
+              >
+                Save Snapshot
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirmation Modal */}
+      {confirmModal.isOpen && (
+        <div className="modal block">
+          <div className="modal-content rounded-xl p-6 relative border border-[#1A1A1A]/15 shadow-lg max-w-[400px]">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#1A1A1A]/10">
+              <h2 className="text-sm font-bold uppercase tracking-[0.15em] text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                Confirm Action
+              </h2>
+              <span
+                onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                className="cursor-pointer text-2xl text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                &times;
+              </span>
+            </div>
+            <p className="text-xs text-slate-750 leading-relaxed mb-6 font-sans">
+              {confirmModal.message}
+            </p>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                className="w-1/2 py-2.5 text-[10px] uppercase font-bold tracking-widest text-[#1A1A1A] bg-white border border-[#1A1A1A]/10 hover:bg-slate-50 rounded transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  confirmModal.onConfirm();
+                  setConfirmModal({ ...confirmModal, isOpen: false });
+                }}
+                className="w-1/2 py-2.5 text-[10px] uppercase font-bold tracking-widest text-white bg-red-600 hover:bg-red-750 rounded transition-all shadow-none"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="modal block">
+          <div className="modal-content rounded-xl p-6 relative border border-[#1A1A1A]/15 shadow-lg max-w-[400px]">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#1A1A1A]/10">
+              <h2 className="text-sm font-bold uppercase tracking-[0.15em] text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                Notice
+              </h2>
+              <span
+                onClick={() => setAlertModal({ ...alertModal, isOpen: false })}
+                className="cursor-pointer text-2xl text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                &times;
+              </span>
+            </div>
+            <p className="text-xs text-slate-750 leading-relaxed mb-6 font-sans">
+              {alertModal.message}
+            </p>
+            <button
+              onClick={() => setAlertModal({ ...alertModal, isOpen: false })}
+              className="w-full py-2.5 text-[10px] uppercase font-bold tracking-widest text-white bg-[#1A1A1A] hover:bg-[#2C2C2C] rounded transition-all text-center"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
