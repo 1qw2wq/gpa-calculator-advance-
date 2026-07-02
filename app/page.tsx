@@ -70,7 +70,7 @@ const predefinedCourseCategories: Record<string, string[]> = {
   ],
   "Business & Technology": [
     "Business Studies", "Introduction to Business", "Business Management", "Marketing", "Accounting", "Economics", "Personal Finance", "Entrepreneurship", "Business Law", "International Business", "Business Ethics", "Human Resources Management",
-    "Computer Science", "Coding", "Web Development", "Game Design", "Cybersecurity", "AP Computer Science Principles", "AP Computer Science A", "Data Science", "Information Technology", "Computer Graphics", "Database Management", "Network Administration", "Software Engineering", "Mobile App Development", "Artificial Intelligence", "Machine Learning", "Robotics Programming"
+    "Computer Science", "Coding", "Web Development", "Game Design", "Cybersecurity", "AP Computer Science Principles", "AP Computer Science A", "Data Science", "Information Technology", "Computer Graphics", "Database Management", "Network Administration", "Software Engineering", "Mobile App Development", "Artificial Intelligence", "Machine Learning", "Robotics Programming", "AP business"
   ],
   "Physical Education": [
     "PE (Physical Education)", "Health", "Wellness", "Sports", "Team Sports", "Individual Sports", "Yoga", "Pilates", "Weight Training", "Aerobics", "Swimming", "Track and Field", "Basketball", "Soccer", "Volleyball", "Tennis", "Badminton", "Dance Fitness", "Cross Country", "Golf", "Gymnastics", "Lacrosse", "Rock Climbing", "Self-Defense", "Water Polo", "Zumba"
@@ -138,6 +138,170 @@ const convertScoreToLetterGrade = (score: number): string => {
   return "F";
 };
 
+interface ScrapedCourse {
+  id: string;
+  className: string;
+  originalName: string;
+  score: string;
+  category: string;
+  level: "Regular" | "Honors" | "AP/IB" | "Custom";
+  credit: string;
+}
+
+const cleanAndMapCourse = (rawName: string, rawScore: string, roundScores: boolean = true): Omit<ScrapedCourse, "id"> => {
+  const originalName = rawName.trim();
+  let cleanedName = originalName;
+
+  // Remove grade levels e.g. (Grade 11), (Grade 12), etc.
+  cleanedName = cleanedName.replace(/\s*\(Grade\s+\d+\)/gi, "");
+  // Remove years e.g. 2025-2026 or 25-26
+  cleanedName = cleanedName.replace(/\s*\d{4}-\d{4}/g, "");
+  cleanedName = cleanedName.replace(/\s*\d{2}-\d{2}/g, "");
+  // Remove teacher names if they look like typical bracketed suffixes (e.g. " (May + June 2026)")
+  cleanedName = cleanedName.replace(/\s*\([^)]+\)/g, "");
+  // Remove semester tags or trailing codes
+  cleanedName = cleanedName.replace(/\b[S|T|Y][12]\b/gi, "");
+  cleanedName = cleanedName.replace(/\bG\d{1,2}\b/gi, "");
+  // Clean double spaces or hyphens
+  cleanedName = cleanedName.replace(/[-\s]+/g, " ").trim();
+
+  let mappedName = cleanedName;
+  let category = "Core Subjects";
+  let level: "Regular" | "Honors" | "AP/IB" | "Custom" = "Regular";
+
+  const lowerName = cleanedName.toLowerCase();
+
+  // Decide level based on keywords
+  if (lowerName.includes("ap ") || lowerName.startsWith("ap-") || lowerName.includes(" ap") || lowerName.includes("advanced placement") || lowerName.includes("ib ")) {
+    level = "AP/IB";
+  } else if (lowerName.includes("honors") || lowerName.includes("hrs") || lowerName.includes("h ")) {
+    level = "Honors";
+  }
+
+  // Predefined keyword matching
+  if (lowerName.includes("ap business") || lowerName.includes("ap-business")) {
+    mappedName = "AP Business";
+    category = "Business & Technology";
+    level = "AP/IB";
+  } else if (lowerName.includes("pae") || lowerName.includes("pe") || lowerName.includes("physical education") || lowerName.includes("physical activity")) {
+    mappedName = "Physical Education";
+    category = "Physical Education";
+  } else if (lowerName.includes("calc bc") || lowerName.includes("calculus bc")) {
+    mappedName = "AP Calculus BC";
+    category = "Core Subjects";
+  } else if (lowerName.includes("calc ab") || lowerName.includes("calculus ab")) {
+    mappedName = "AP Calculus AB";
+    category = "Core Subjects";
+  } else if (lowerName.includes("microecon") || lowerName.includes("microeconomics") || lowerName.includes("micro econ")) {
+    mappedName = "AP Economics (Micro)";
+    category = "Business & Technology";
+  } else if (lowerName.includes("macroecon") || lowerName.includes("macroeconomics") || lowerName.includes("macro econ")) {
+    mappedName = "AP Economics (Macro)";
+    category = "Business & Technology";
+  } else if (lowerName.includes("eap") || lowerName.includes("english for academic")) {
+    mappedName = "EAP (English for Academic Purposes)";
+    category = "Core Subjects";
+  } else if (lowerName.includes("chemistry") || lowerName.includes("chem")) {
+    mappedName = lowerName.includes("ap") ? "AP Chemistry" : "Chemistry";
+    category = "Core Subjects";
+  } else if (lowerName.includes("physics") || lowerName.includes("phys")) {
+    mappedName = lowerName.includes("ap") ? "AP Physics 1" : "Physics";
+    category = "Core Subjects";
+  } else if (lowerName.includes("stats") || lowerName.includes("statistics")) {
+    mappedName = lowerName.includes("ap") ? "AP Statistics" : "Statistics";
+    category = "Core Subjects";
+  } else if (lowerName.includes("csp") || lowerName.includes("computer science principles")) {
+    mappedName = "AP Computer Science Principles";
+    category = "Business & Technology";
+  } else if (lowerName.includes("csa") || lowerName.includes("computer science a")) {
+    mappedName = "AP Computer Science A";
+    category = "Business & Technology";
+  } else if (lowerName.includes("chinese")) {
+    mappedName = "Chinese";
+    category = "Languages";
+    if (lowerName.includes("math")) { mappedName = "Chinese Math"; category = "Chinese Specific"; }
+    else if (lowerName.includes("chemistry")) { mappedName = "Chinese Chemistry"; category = "Chinese Specific"; }
+    else if (lowerName.includes("biology")) { mappedName = "Chinese Biology"; category = "Chinese Specific"; }
+    else if (lowerName.includes("history")) { mappedName = "Chinese History"; category = "Chinese Specific"; }
+    else if (lowerName.includes("calligraphy")) { mappedName = "Chinese Calligraphy"; category = "Chinese Specific"; }
+    else if (lowerName.includes("geography")) { mappedName = "Chinese Geography"; category = "Chinese Specific"; }
+    else if (lowerName.includes("culture")) { mappedName = "Chinese Culture"; category = "Chinese Specific"; }
+    else if (lowerName.includes("philosophy")) { mappedName = "Chinese Philosophy"; category = "Chinese Specific"; }
+    else if (lowerName.includes("technology")) { mappedName = "Chinese Technology"; category = "Chinese Specific"; }
+    else if (lowerName.includes("politics")) { mappedName = "Chinese Politics"; category = "Chinese Specific"; }
+    else if (lowerName.includes("ap")) { mappedName = "AP Chinese Language and Culture"; category = "Languages"; }
+  } else if (lowerName.includes("spanish")) {
+    mappedName = "Spanish";
+    category = "Languages";
+    if (lowerName.includes("ap")) mappedName = "AP Spanish Language and Culture";
+  } else if (lowerName.includes("french")) {
+    mappedName = "French";
+    category = "Languages";
+    if (lowerName.includes("ap")) mappedName = "AP French Language and Culture";
+  } else if (lowerName.includes("stocks") || lowerName.includes("finance")) {
+    mappedName = "Personal Finance";
+    category = "Business & Technology";
+  } else if (lowerName.includes("biology") || lowerName.includes("bio")) {
+    mappedName = lowerName.includes("ap") ? "AP Biology" : "Biology";
+    category = "Core Subjects";
+  } else {
+    // Search predefined
+    let found = false;
+    for (const [cat, courses] of Object.entries(predefinedCourseCategories)) {
+      const match = courses.find(c => c.toLowerCase() === cleanedName.toLowerCase() || cleanedName.toLowerCase().startsWith(c.toLowerCase()));
+      if (match) {
+        mappedName = match;
+        category = cat;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      if (lowerName.includes("math") || lowerName.includes("algebra") || lowerName.includes("geometry") || lowerName.includes("pre-calc") || lowerName.includes("calculus") || lowerName.includes("discrete")) {
+        category = "Core Subjects";
+      } else if (lowerName.includes("history") || lowerName.includes("civics") || lowerName.includes("economics") || lowerName.includes("econ") || lowerName.includes("geography") || lowerName.includes("social") || lowerName.includes("psychology")) {
+        category = "Core Subjects";
+      } else if (lowerName.includes("music") || lowerName.includes("art") || lowerName.includes("sculpture") || lowerName.includes("drama") || lowerName.includes("theatre") || lowerName.includes("dance")) {
+        category = "Arts";
+      } else if (lowerName.includes("coding") || lowerName.includes("programming") || lowerName.includes("computer") || lowerName.includes("web") || lowerName.includes("cybersecurity") || lowerName.includes("software")) {
+        category = "Business & Technology";
+      } else if (lowerName.includes("pe") || lowerName.includes("physical") || lowerName.includes("health") || lowerName.includes("wellness") || lowerName.includes("sports")) {
+        category = "Physical Education";
+      } else if (lowerName.includes("philosophy") || lowerName.includes("ethics") || lowerName.includes("debate") || lowerName.includes("public speaking")) {
+        category = "Other Electives";
+      }
+    }
+  }
+
+  // Rounding score (e.g. 96.5 -> 97, 96.4 -> 96 if roundScores is true)
+  let score = "";
+  const pctMatch = rawScore.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (pctMatch) {
+    const val = parseFloat(pctMatch[1]);
+    score = String(roundScores ? Math.round(val) : val);
+  } else {
+    const numMatch = rawScore.match(/(\d+(?:\.\d+)?)/);
+    if (numMatch) {
+      const val = parseFloat(numMatch[1]);
+      score = String(roundScores ? Math.round(val) : val);
+    }
+  }
+
+  return {
+    className: mappedName,
+    originalName,
+    score,
+    category,
+    level,
+    credit: "1.0"
+  };
+};
+
+const generateUniqueId = (prefix: string): string => {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+};
+
 export default function Home() {
   // State variables loaded from Local Storage
   const [terms, setTerms] = useState<Term[]>([]);
@@ -170,6 +334,16 @@ export default function Home() {
   
   // Active autocomplete suggestion tracker: { termId, courseId }
   const [activeSuggestionBox, setActiveSuggestionBox] = useState<{ termId: string; courseId: string } | null>(null);
+
+  // ManageBac Integration state variables
+  const [isManageBacModalOpen, setIsManageBacModalOpen] = useState<boolean>(false);
+  const [manageBacRawText, setManageBacRawText] = useState<string>("");
+  const [parsedManageBacCourses, setParsedManageBacCourses] = useState<ScrapedCourse[]>([]);
+  const [selectedManageBacCourses, setSelectedManageBacCourses] = useState<Record<string, boolean>>({});
+  const [manageBacTargetTermId, setManageBacTargetTermId] = useState<string>("new");
+  const [manageBacImportMode, setManageBacImportMode] = useState<"append" | "replace">("append");
+  const [scriptCopied, setScriptCopied] = useState<boolean>(false);
+  const [roundScores, setRoundScores] = useState<boolean>(true);
 
   // Server-side AI mentoring helpers
   const [isGeneratingMentorAdvice, setIsGeneratingMentorAdvice] = useState<boolean>(false);
@@ -208,6 +382,225 @@ export default function Home() {
       isOpen: true,
       message,
     });
+  };
+
+  // ManageBac Parsing and Import Functions
+  const handleParseManageBacInput = (text: string, forceRoundScores?: boolean) => {
+    const activeRounding = forceRoundScores !== undefined ? forceRoundScores : roundScores;
+    setManageBacRawText(text);
+    if (!text.trim()) {
+      setParsedManageBacCourses([]);
+      setSelectedManageBacCourses({});
+      return;
+    }
+
+    let parsed: any[] = [];
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      const jsonMatch = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+      if (jsonMatch) {
+        try {
+          parsed = JSON.parse(jsonMatch[0]);
+        } catch (err) {}
+      }
+    }
+
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      parsed = [];
+      const lines = text.split("\n");
+      lines.forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        // Check A: printed object style e.g. 3: {Class: 'EAP 201 (Grade 11)', Overall Mark (Score): 'A (95.63%)'}
+        const classRegex = /Class:\s*['"`]?(.*?)['"`]?(?:\s*,|\s*\})/i;
+        const scoreRegex = /(?:Overall Mark \(Score\)|Overall Mark|Score|overallMark):\s*['"`]?(.*?)['"`]?(?:\s*,|\s*\})/i;
+        
+        const cMatch = trimmed.match(classRegex);
+        const sMatch = trimmed.match(scoreRegex);
+
+        if (cMatch) {
+          let className = cMatch[1].trim();
+          let scoreVal = sMatch ? sMatch[1].trim() : "";
+          
+          if (className.endsWith(",")) className = className.slice(0, -1).trim();
+          if (scoreVal.endsWith(",")) scoreVal = scoreVal.slice(0, -1).trim();
+          if (className.endsWith("}")) className = className.slice(0, -1).trim();
+          if (scoreVal.endsWith("}")) scoreVal = scoreVal.slice(0, -1).trim();
+          
+          const stripQuotes = (s: string) => {
+            if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+              return s.slice(1, -1).trim();
+            }
+            return s;
+          };
+          className = stripQuotes(className);
+          scoreVal = stripQuotes(scoreVal);
+
+          if (className) {
+            parsed.push({
+              "Class": className,
+              "Overall Mark (Score)": scoreVal
+            });
+            return;
+          }
+        }
+
+        // Check B: table-like copy/paste from console.table or tab-delimited or spaces
+        let cleanLine = trimmed;
+        if (cleanLine.startsWith("│")) cleanLine = cleanLine.substring(1);
+        if (cleanLine.endsWith("│")) cleanLine = cleanLine.substring(0, cleanLine.length - 1);
+        
+        const parts = cleanLine.split(/\s*│\s*|\t+|\s{2,}/).map(p => p.trim()).filter(Boolean);
+        
+        if (parts.length >= 2) {
+          let className = "";
+          let scoreVal = "";
+          
+          const firstIsIndex = /^\d+$/.test(parts[0]);
+          if (parts.length >= 3 && firstIsIndex) {
+            className = parts[1];
+            scoreVal = parts[2];
+          } else {
+            className = parts[0];
+            scoreVal = parts[1];
+          }
+
+          const stripQuotes = (s: string) => {
+            if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+              return s.slice(1, -1).trim();
+            }
+            return s;
+          };
+          className = stripQuotes(className);
+          scoreVal = stripQuotes(scoreVal);
+
+          const isHeader = className.toLowerCase() === "class" || scoreVal.toLowerCase().includes("overall mark") || className.toLowerCase().includes("(index)");
+          const isSeparator = className.includes("───") || className.includes("═══") || className.startsWith("┌") || className.startsWith("└") || className.startsWith("├");
+
+          if (className && !isHeader && !isSeparator) {
+            parsed.push({
+              "Class": className,
+              "Overall Mark (Score)": scoreVal
+            });
+          }
+        }
+      });
+    }
+
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const list: ScrapedCourse[] = [];
+      const selectMap: Record<string, boolean> = {};
+
+      parsed.forEach((item, index) => {
+        const rawName = item.Class || item.class || item.Course || item.course || item["Class Name"] || "";
+        const rawScore = item["Overall Mark (Score)"] || item["Overall Mark"] || item.Score || item.score || item.Grade || item.grade || "";
+
+        if (rawName && typeof rawName === "string") {
+          const cleanCourse = cleanAndMapCourse(rawName, String(rawScore), activeRounding);
+          const courseId = generateUniqueId(`scraped-${index}`);
+          const finalItem = {
+            ...cleanCourse,
+            id: courseId
+          };
+          list.push(finalItem);
+
+          const lowerName = rawName.toLowerCase();
+          const ignoreList = [
+            "my workspace", "calendar", "tasks & deadlines", "tasks", "deadlines",
+            "browse all groups", "browse all classes", "browse all files", 
+            "dashboard", "messages", "groups", "classes", "files", "browse all"
+          ];
+          
+          const isIgnoredName = ignoreList.some(ignore => lowerName.includes(ignore));
+          const isFailedLoad = rawScore && (rawScore.toLowerCase().includes("empty") || rawScore.toLowerCase().includes("not found") || rawScore.toLowerCase().includes("http"));
+
+          selectMap[courseId] = !(isIgnoredName || isFailedLoad);
+        }
+      });
+
+      setParsedManageBacCourses(list);
+      setSelectedManageBacCourses(selectMap);
+    } else {
+      setParsedManageBacCourses([]);
+      setSelectedManageBacCourses({});
+    }
+  };
+
+  const handleUpdateParsedCourseField = (id: string, field: keyof ScrapedCourse, value: any) => {
+    setParsedManageBacCourses(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  };
+
+  const handleConfirmManageBacImport = () => {
+    const selectedCoursesToImport = parsedManageBacCourses.filter(c => selectedManageBacCourses[c.id]);
+    if (selectedCoursesToImport.length === 0) {
+      showAlert("Please select at least one course to import.");
+      return;
+    }
+
+    const coursesToInsert: Course[] = selectedCoursesToImport.map(c => ({
+      id: generateUniqueId("course"),
+      category: c.category,
+      courseName: c.className,
+      score: c.score,
+      credit: c.credit,
+      level: c.level,
+      weightBoost: c.level === "Regular" ? "0.0" : c.level === "Honors" ? "0.5" : c.level === "AP/IB" ? "1.0" : "0.0"
+    }));
+
+    let updatedTerms = [...terms];
+
+    if (manageBacTargetTermId === "new") {
+      const nextTermNum = terms.length + 1;
+      const newTerm: Term = {
+        id: generateUniqueId("term"),
+        title: `Semester ${nextTermNum} (ManageBac Import)`,
+        courses: coursesToInsert,
+        reflection: "Imported grades from ManageBac portal.",
+        bullets: [`Imported ${coursesToInsert.length} courses from ManageBac.`]
+      };
+      updatedTerms.push(newTerm);
+      showAlert(`Successfully created Semester ${nextTermNum} and imported ${coursesToInsert.length} courses!`);
+    } else {
+      updatedTerms = terms.map(term => {
+        if (term.id === manageBacTargetTermId) {
+          let finalCourses = [...term.courses];
+          if (manageBacImportMode === "replace") {
+            finalCourses = coursesToInsert;
+          } else {
+            const cleanExisting = term.courses.filter(c => c.courseName || c.score);
+            finalCourses = [...cleanExisting, ...coursesToInsert];
+          }
+          
+          if (finalCourses.length === 0) {
+            finalCourses.push({
+              id: `course-empty-${term.id}`,
+              category: "Core Subjects",
+              courseName: "",
+              score: "",
+              credit: ""
+            });
+          }
+
+          return {
+            ...term,
+            courses: finalCourses,
+            bullets: [...term.bullets, `Imported/Updated ${coursesToInsert.length} courses from ManageBac.`]
+          };
+        }
+        return term;
+      });
+
+      const targetTermTitle = terms.find(t => t.id === manageBacTargetTermId)?.title || "Selected Semester";
+      showAlert(`Successfully imported ${coursesToInsert.length} courses into ${targetTermTitle}!`);
+    }
+
+    syncTerms(updatedTerms);
+    setIsManageBacModalOpen(false);
+    setManageBacRawText("");
+    setParsedManageBacCourses([]);
+    setSelectedManageBacCourses({});
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -270,6 +663,11 @@ export default function Home() {
         setShowIntro(storedShowIntro === "true");
       }
 
+      const storedRoundScores = localStorage.getItem("gpaTracker_roundScores");
+      if (storedRoundScores !== null) {
+        setRoundScores(storedRoundScores === "true");
+      }
+
       // Retrieve custom details
       const storedAccent = localStorage.getItem("gpaTracker_accent");
       if (storedAccent) setActiveAccent(storedAccent);
@@ -309,6 +707,12 @@ export default function Home() {
     localStorage.setItem("gpaTracker_personalMotivator", val);
   };
 
+  const syncRoundScores = (val: boolean) => {
+    setRoundScores(val);
+    localStorage.setItem("gpaTracker_roundScores", String(val));
+    handleParseManageBacInput(manageBacRawText, val);
+  };
+
   // GPA calculation helper
   const getTotals = () => {
     let totalWeightedGradePoints = 0;
@@ -317,10 +721,13 @@ export default function Home() {
 
     terms.forEach((term) => {
       term.courses.forEach((course) => {
-        const score = parseFloat(course.score);
+        let score = parseFloat(course.score);
         const credit = parseFloat(course.credit);
 
         if (!isNaN(score) && !isNaN(credit)) {
+          if (roundScores) {
+            score = Math.round(score);
+          }
           const gradePoint = convertScoreToGradePoint(score);
           
           let boost = 0;
@@ -376,7 +783,7 @@ export default function Home() {
       credit: ""
     };
     const newTerm: Term = {
-      id: `term-${Date.now()}`,
+      id: generateUniqueId("term"),
       title: `Semester ${nextTermNum}`,
       courses: [newCourse],
       reflection: "",
@@ -558,7 +965,7 @@ export default function Home() {
     });
 
     const newSnapshot: GpaSnapshot = {
-      id: `snapshot-${Date.now()}`,
+      id: generateUniqueId("snapshot"),
       timestamp: timestampStr,
       gpa: totals.gpa,
       totalCredits: totals.totalCredits,
@@ -898,6 +1305,15 @@ export default function Home() {
               >
                 <span className="material-symbols-outlined text-[18px]">upload</span>
                 <span className="hidden sm:inline">Import</span>
+              </button>
+
+              <button
+                onClick={() => setIsManageBacModalOpen(true)}
+                className="flex items-center gap-2 px-3 py-2 text-xs uppercase tracking-wider font-semibold text-slate-700 bg-white/40 hover:bg-white rounded-xl transition-all border border-[#1A1A1A]/10 shadow-none"
+                id="managebacBtn"
+              >
+                <span className="material-symbols-outlined text-[18px]">sync_alt</span>
+                <span className="hidden sm:inline">ManageBac</span>
               </button>
 
               <button
@@ -1396,6 +1812,29 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Rounding selection */}
+                  <div className="pt-3 border-t border-[#1A1A1A]/5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col pr-4">
+                        <span className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-0.5 block">Round Score Decimals</span>
+                        <span className="text-[9.5px] text-slate-500 leading-snug">
+                          Interpret decimals with standard rounding (e.g. 96.5 &rarr; 97, 96.4 &rarr; 96) for all courses.
+                        </span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={roundScores}
+                          onChange={(e) => syncRoundScores(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1A1A1A]"
+                             style={{ backgroundColor: roundScores ? currentAccent.color : undefined }}
+                        ></div>
+                      </label>
+                    </div>
+                  </div>
+
                   {/* 2. Custom Category Addition */}
                   <div className="pt-3 border-t border-[#1A1A1A]/5">
                     <label className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 block">Create Customized Course Category</label>
@@ -1652,7 +2091,11 @@ export default function Home() {
                               <div className="w-full md:w-[15%]">
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Result Grade</label>
                                 <div className="bg-[#1A1A1A]/5 border border-[#1A1A1A]/5 rounded-lg py-2.5 px-3 text-xs font-bold text-center w-full" style={{ color: currentAccent.color }}>
-                                  {course.score ? `${convertScoreToLetterGrade(parseFloat(course.score))} (${convertScoreToGradePoint(parseFloat(course.score)).toFixed(2)})` : "—"}
+                                  {course.score ? (() => {
+                                    const parsedVal = parseFloat(course.score);
+                                    const displayVal = roundScores ? Math.round(parsedVal) : parsedVal;
+                                    return `${convertScoreToLetterGrade(displayVal)} (${convertScoreToGradePoint(displayVal).toFixed(2)})`;
+                                  })() : "—"}
                                 </div>
                               </div>
 
@@ -1782,6 +2225,601 @@ export default function Home() {
       {/* ========================================================
          MODALS (Export, Full Scale, and Committing Snapshot)
          ======================================================== */}
+
+      {/* ManageBac Import Modal */}
+      {isManageBacModalOpen && (
+        <div className="modal block">
+          <div className="modal-content rounded-xl p-6 relative border border-[#1A1A1A]/15 shadow-lg max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-[#1A1A1A]/10">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-xl" style={{ color: currentAccent.color }}>sync_alt</span>
+                <h2 className="text-sm font-bold uppercase tracking-[0.15em] text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>ManageBac Grade Integration</h2>
+              </div>
+              <span
+                onClick={() => {
+                  setIsManageBacModalOpen(false);
+                  setManageBacRawText("");
+                  setParsedManageBacCourses([]);
+                  setSelectedManageBacCourses({});
+                }}
+                className="cursor-pointer text-2xl text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                &times;
+              </span>
+            </div>
+
+            <div className="space-y-6 font-sans">
+              {/* Step 1: Explanation and Script Copy */}
+              <div className="p-4 bg-white/50 border border-[#1A1A1A]/10 rounded-lg">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
+                  <span className="bg-[#1A1A1A] text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]">1</span>
+                  <span>Extract Grades from ManageBac</span>
+                </h3>
+                <p className="text-[11px] text-slate-600 leading-relaxed mb-3">
+                  Log into your ManageBac student portal in another browser tab, navigate to any of your class pages, and open your browser&apos;s Developer Console (press <strong>F12</strong>, or <strong>Right-Click &rarr; Inspect &rarr; Console</strong>). Copy and paste the <strong>In-Page Visual Scanner</strong> script below, then press <strong>Enter</strong>.
+                </p>
+                
+                <div className="p-3 bg-blue-50/50 border border-blue-200/50 rounded-lg text-[10.5px] text-slate-600 mb-3 leading-normal">
+                  <strong className="text-slate-800">🔒 Cross-Domain Security Note:</strong> Due to browser Same-Origin Policy, websites cannot directly fetch data from other domains (like ManageBac). Running this client-side scanner inside your logged-in ManageBac tab is the <strong>safest, most secure, and only browser-supported method</strong> to fetch your grades automatically without exposing your password or credentials.
+                </div>
+
+                <div className="relative">
+                  <pre className="p-3 bg-slate-900 text-slate-200 text-[10px] font-mono rounded-lg overflow-x-auto max-h-[180px] mb-2 border border-slate-850 select-all">
+{`(async function() {
+    console.log("Initializing in-page multi-class visual scanner...");
+
+    // 1. Identify all class links from your sidebar navigation menu (Parent Window)
+    const classElements = Array.from(document.querySelectorAll('.f-menu__submenu-item a.f-menu__submenu-link'))
+        .filter(a => {
+            const titleSpan = a.querySelector('.f-menu__submenu-link-title');
+            return titleSpan && titleSpan.textContent.trim() !== "Browse All Classes";
+        });
+
+    if (classElements.length === 0) {
+        console.log("Could not find any classes in your sidebar navigation menu.");
+        alert("Please run this script while logged into ManageBac!");
+        return;
+    }
+
+    console.log(\`Identified \${classElements.length} classes. Fetching records in the background...\`);
+    const overallGrades = [];
+
+    // Create a floating container to show the progress and the active iframe
+    let visualContainer = document.getElementById('mb-visual-scanner');
+    if (visualContainer) visualContainer.remove();
+
+    visualContainer = document.createElement('div');
+    visualContainer.id = 'mb-visual-scanner';
+    Object.assign(visualContainer.style, {
+        position: 'fixed',
+        bottom: '20px',
+        right: '20px',
+        width: '600px',
+        height: '450px',
+        backgroundColor: '#ffffff',
+        border: '3px solid #7bcdc9',
+        borderRadius: '12px',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+        zIndex: '99999',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        fontFamily: 'sans-serif'
+    });
+
+    const header = document.createElement('div');
+    Object.assign(header.style, {
+        backgroundColor: '#7bcdc9',
+        color: '#ffffff',
+        padding: '12px',
+        fontWeight: 'bold',
+        fontSize: '14px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+    });
+    header.innerHTML = '<span>MB Class Grade Scanner</span><span id="scan-progress" style="background:rgba(255,255,255,0.25);padding:2px 8px;border-radius:10px;font-size:11px;">0/0</span>';
+    visualContainer.appendChild(header);
+
+    // Status text
+    const statusText = document.createElement('div');
+    Object.assign(statusText.style, {
+        padding: '10px 14px',
+        fontSize: '12px',
+        borderBottom: '1px solid #eee',
+        color: '#333',
+        fontWeight: '500',
+        backgroundColor: '#f9f9f9'
+    });
+    statusText.textContent = 'Preparing scanner...';
+    visualContainer.appendChild(statusText);
+
+    // Preview frame
+    const iframeContainer = document.createElement('div');
+    Object.assign(iframeContainer.style, {
+        flex: '1',
+        position: 'relative',
+        backgroundColor: '#eee'
+    });
+    
+    const iframe = document.createElement('iframe');
+    Object.assign(iframe.style, {
+        border: 'none',
+        transform: 'scale(0.6)',
+        transformOrigin: 'top left',
+        width: '167%',
+        height: '167%'
+    });
+    iframeContainer.appendChild(iframe);
+    visualContainer.appendChild(iframeContainer);
+
+    document.body.appendChild(visualContainer);
+
+    for (let i = 0; i < classElements.length; i++) {
+        const element = classElements[i];
+        const className = element.querySelector('.f-menu__submenu-link-title').textContent.trim();
+        const url = element.href;
+
+        header.querySelector('#scan-progress').textContent = \`\${i + 1}/\${classElements.length}\`;
+        statusText.textContent = \`Loading: \${className}...\`;
+
+        // Load iframe (this points directly to the /units tab via the sidebar link)
+        iframe.src = url;
+
+        // Wait for iframe to load
+        await new Promise((resolve) => {
+            iframe.onload = () => resolve();
+        });
+
+        // Let the page settle briefly
+        await new Promise(resolve => setTimeout(resolve, 850));
+
+        try {
+            const doc = iframe.contentDocument || iframe.contentWindow.document;
+
+            // Step 1: Open the details sidebar (using the precise button from your screenshot)
+            const iframeInfoButton = doc.querySelector('button[aria-controls="sidebar_info"]');
+            if (iframeInfoButton && iframeInfoButton.getAttribute('aria-expanded') === 'false') {
+                iframeInfoButton.click();
+                statusText.textContent = \`Opening details sidebar for: \${className}...\`;
+                await new Promise(resolve => setTimeout(resolve, 850)); // wait for sidebar animation
+            }
+
+            // Step 2: Extract the overall score from the sidebar container
+            const container = doc.querySelector('.sidebar-items-list');
+            let overallMark = "Not yet available";
+
+            if (container) {
+                const rows = container.querySelectorAll('.list-item:not(.list-item-head)');
+                rows.forEach(row => {
+                    const cells = row.querySelectorAll('.cell');
+                    if (cells.length >= 2) {
+                        const category = cells[0].textContent.trim().replace(/\\s+/g, ' ');
+                        if (category.toLowerCase() === 'overall') {
+                            overallMark = cells[1].textContent.trim().replace(/\\s+/g, ' ');
+                        }
+                    }
+                });
+            }
+
+            overallGrades.push({
+                "Class": className,
+                "Overall Mark (Score)": overallMark
+            });
+
+        } catch (err) {
+            console.error(\`Error scanning \${className}:\`, err);
+            overallGrades.push({
+                "Class": className,
+                "Overall Mark (Score)": "Scan Error"
+            });
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    statusText.textContent = "Scanning complete! Copying results...";
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    visualContainer.remove();
+
+    console.clear();
+    console.log("=== Overall Grades for All Enrolled Classes ===");
+    console.table(overallGrades);
+    const jsonStr = JSON.stringify(overallGrades, null, 2);
+    try {
+        await navigator.clipboard.writeText(jsonStr);
+        alert("SUCCESS! ManageBac grade data has been extracted and copied to your clipboard automatically! Please return to this GPA Tracker app and paste it.");
+    } catch (e) {
+        console.log(jsonStr);
+        alert("Extraction done. Please copy the printed JSON block from your developer console below.");
+    }
+})();`}
+                  </pre>
+                  <button
+                    onClick={() => {
+                      const scriptText = `(async function() {
+    console.log("Initializing in-page multi-class visual scanner...");
+
+    // 1. Identify all class links from your sidebar navigation menu (Parent Window)
+    const classElements = Array.from(document.querySelectorAll('.f-menu__submenu-item a.f-menu__submenu-link'))
+        .filter(a => {
+            const titleSpan = a.querySelector('.f-menu__submenu-link-title');
+            return titleSpan && titleSpan.textContent.trim() !== "Browse All Classes";
+        });
+
+    if (classElements.length === 0) {
+        console.log("Could not find any classes in your sidebar navigation menu.");
+        alert("Please run this script while logged into ManageBac!");
+        return;
+    }
+
+    console.log(\`Identified \${classElements.length} classes. Fetching records in the background...\`);
+    const overallGrades = [];
+
+    // Create a floating container to show the progress and the active iframe
+    let visualContainer = document.getElementById('mb-visual-scanner');
+    if (visualContainer) visualContainer.remove();
+
+    visualContainer = document.createElement('div');
+    visualContainer.id = 'mb-visual-scanner';
+    Object.assign(visualContainer.style, {
+        position: 'fixed',
+        bottom: '20px',
+        right: '20px',
+        width: '600px',
+        height: '450px',
+        backgroundColor: '#ffffff',
+        border: '3px solid #7bcdc9',
+        borderRadius: '12px',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+        zIndex: '99999',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        fontFamily: 'sans-serif'
+    });
+
+    const header = document.createElement('div');
+    Object.assign(header.style, {
+        backgroundColor: '#7bcdc9',
+        color: '#ffffff',
+        padding: '12px',
+        fontWeight: 'bold',
+        fontSize: '14px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+    });
+    header.innerHTML = '<span>MB Class Grade Scanner</span><span id="scan-progress" style="background:rgba(255,255,255,0.25);padding:2px 8px;border-radius:10px;font-size:11px;">0/0</span>';
+    visualContainer.appendChild(header);
+
+    // Status text
+    const statusText = document.createElement('div');
+    Object.assign(statusText.style, {
+        padding: '10px 14px',
+        fontSize: '12px',
+        borderBottom: '1px solid #eee',
+        color: '#333',
+        fontWeight: '500',
+        backgroundColor: '#f9f9f9'
+    });
+    statusText.textContent = 'Preparing scanner...';
+    visualContainer.appendChild(statusText);
+
+    // Preview frame
+    const iframeContainer = document.createElement('div');
+    Object.assign(iframeContainer.style, {
+        flex: '1',
+        position: 'relative',
+        backgroundColor: '#eee'
+    });
+    
+    const iframe = document.createElement('iframe');
+    Object.assign(iframe.style, {
+        border: 'none',
+        transform: 'scale(0.6)',
+        transformOrigin: 'top left',
+        width: '167%',
+        height: '167%'
+    });
+    iframeContainer.appendChild(iframe);
+    visualContainer.appendChild(iframeContainer);
+
+    document.body.appendChild(visualContainer);
+
+    for (let i = 0; i < classElements.length; i++) {
+        const element = classElements[i];
+        const className = element.querySelector('.f-menu__submenu-link-title').textContent.trim();
+        const url = element.href;
+
+        header.querySelector('#scan-progress').textContent = \`\${i + 1}/\s*classElements.length\`.replace('/s*', '');
+        header.querySelector('#scan-progress').textContent = \`\${i + 1}/\${classElements.length}\`;
+        statusText.textContent = \`Loading: \${className}...\`;
+
+        // Load iframe (this points directly to the /units tab via the sidebar link)
+        iframe.src = url;
+
+        // Wait for iframe to load
+        await new Promise((resolve) => {
+            iframe.onload = () => resolve();
+        });
+
+        // Let the page settle briefly
+        await new Promise(resolve => setTimeout(resolve, 850));
+
+        try {
+            const doc = iframe.contentDocument || iframe.contentWindow.document;
+
+            // Step 1: Open the details sidebar (using the precise button from your screenshot)
+            const iframeInfoButton = doc.querySelector('button[aria-controls="sidebar_info"]');
+            if (iframeInfoButton && iframeInfoButton.getAttribute('aria-expanded') === 'false') {
+                iframeInfoButton.click();
+                statusText.textContent = \`Opening details sidebar for: \${className}...\`;
+                await new Promise(resolve => setTimeout(resolve, 850)); // wait for sidebar animation
+            }
+
+            // Step 2: Extract the overall score from the sidebar container
+            const container = doc.querySelector('.sidebar-items-list');
+            let overallMark = "Not yet available";
+
+            if (container) {
+                const rows = container.querySelectorAll('.list-item:not(.list-item-head)');
+                rows.forEach(row => {
+                    const cells = row.querySelectorAll('.cell');
+                    if (cells.length >= 2) {
+                        const category = cells[0].textContent.trim().replace(/\\s+/g, ' ');
+                        if (category.toLowerCase() === 'overall') {
+                            overallMark = cells[1].textContent.trim().replace(/\\s+/g, ' ');
+                        }
+                    }
+                });
+            }
+
+            overallGrades.push({
+                "Class": className,
+                "Overall Mark (Score)": overallMark
+            });
+
+        } catch (err) {
+            console.error(\`Error scanning \${className}:\`, err);
+            overallGrades.push({
+                "Class": className,
+                "Overall Mark (Score)": "Scan Error"
+            });
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    statusText.textContent = "Scanning complete! Copying results...";
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    visualContainer.remove();
+
+    console.clear();
+    console.log("=== Overall Grades for All Enrolled Classes ===");
+    console.table(overallGrades);
+    const jsonStr = JSON.stringify(overallGrades, null, 2);
+    try {
+        await navigator.clipboard.writeText(jsonStr);
+        alert("SUCCESS! ManageBac grade data has been extracted and copied to your clipboard automatically! Please return to this GPA Tracker app and paste it.");
+    } catch (e) {
+        console.log(jsonStr);
+        alert("Extraction done. Please copy the printed JSON block from your developer console below.");
+    }
+})();`;
+                      navigator.clipboard.writeText(scriptText);
+                      setScriptCopied(true);
+                      setTimeout(() => setScriptCopied(false), 2000);
+                    }}
+                    className="absolute top-2 right-2 px-3 py-1 bg-[#1A1A1A] text-white hover:bg-[#2D2D2D] text-[10px] uppercase tracking-wider font-bold rounded flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[12px]">{scriptCopied ? "check" : "content_copy"}</span>
+                    <span>{scriptCopied ? "Copied" : "Copy Script"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2: Paste Area */}
+              <div className="p-4 bg-white/50 border border-[#1A1A1A]/10 rounded-lg">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
+                  <span className="bg-[#1A1A1A] text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]">2</span>
+                  <span>Paste Grade Data Below</span>
+                </h3>
+                <textarea
+                  value={manageBacRawText}
+                  onChange={(e) => handleParseManageBacInput(e.target.value)}
+                  placeholder="Paste the clipboard results here (either raw console logs or JSON array)..."
+                  className="w-full h-24 p-3 font-mono text-[11px] text-slate-750 bg-white border border-[#1A1A1A]/12 rounded focus:border-[#1A1A1A] resize-none focus:outline-none mb-3"
+                />
+                
+                <div className="flex items-center justify-between pt-2.5 border-t border-[#1A1A1A]/5">
+                  <div className="flex flex-col pr-4">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[14px]">calculate</span>
+                      <span>Round Score Decimals</span>
+                    </span>
+                    <span className="text-[9.5px] text-slate-500 leading-snug mt-0.5">
+                      Toggle standard rounding (e.g., 96.5 &rarr; 97, 96.4 &rarr; 96). When off, exact decimal scores are preserved.
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={roundScores}
+                      onChange={(e) => syncRoundScores(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1A1A1A]"></div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Step 3: Verified Staging & Tuning (Only if parsed courses exist) */}
+              {parsedManageBacCourses.length > 0 && (
+                <div className="p-4 bg-white/50 border border-[#1A1A1A]/10 rounded-lg space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <span className="bg-[#1A1A1A] text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]">3</span>
+                    <span>Verify & Stage Courses</span>
+                  </h3>
+                  
+                  <div className="max-h-[250px] overflow-y-auto border border-[#1A1A1A]/10 rounded-lg divide-y divide-[#1A1A1A]/5 bg-white">
+                    {parsedManageBacCourses.map((course) => {
+                      const isSelected = !!selectedManageBacCourses[course.id];
+                      return (
+                        <div key={course.id} className={`p-3 flex flex-col gap-3 ${isSelected ? 'bg-white' : 'bg-slate-50/50 opacity-60'}`}>
+                          {/* Checked & Original Suffix Info */}
+                          <div className="flex items-center justify-between">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => setSelectedManageBacCourses({
+                                  ...selectedManageBacCourses,
+                                  [course.id]: e.target.checked
+                                })}
+                                className="w-4 h-4 rounded text-[#1A1A1A] focus:ring-[#1A1A1A]"
+                              />
+                              <span className="text-xs font-bold text-slate-800">
+                                {course.className || "Unnamed Class"}
+                              </span>
+                            </label>
+                            <span className="text-[9px] font-mono text-slate-400 max-w-[180px] truncate" title={course.originalName}>
+                              Raw: {course.originalName}
+                            </span>
+                          </div>
+
+                          {/* Detail Adjustments */}
+                          {isSelected && (
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
+                              {/* Inline Name Editing */}
+                              <div className="sm:col-span-4">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Name</label>
+                                <input
+                                  type="text"
+                                  value={course.className}
+                                  onChange={(e) => handleUpdateParsedCourseField(course.id, "className", e.target.value)}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
+                                />
+                              </div>
+
+                              {/* Category selection */}
+                              <div className="sm:col-span-3">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Category</label>
+                                <select
+                                  value={course.category}
+                                  onChange={(e) => handleUpdateParsedCourseField(course.id, "category", e.target.value)}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
+                                >
+                                  {[...Object.keys(predefinedCourseCategories), ...customCategories].map(cat => (
+                                    <option key={cat} value={cat}>{cat}</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* Level selection */}
+                              <div className="sm:col-span-2">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Level</label>
+                                <select
+                                  value={course.level}
+                                  onChange={(e) => handleUpdateParsedCourseField(course.id, "level", e.target.value)}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
+                                >
+                                  <option value="Regular">Regular</option>
+                                  <option value="Honors">Honors</option>
+                                  <option value="AP/IB">AP / IB</option>
+                                </select>
+                              </div>
+
+                              {/* Score editing */}
+                              <div className="sm:col-span-2">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Score %</label>
+                                <input
+                                  type="number"
+                                  value={course.score}
+                                  min="0"
+                                  max="100"
+                                  onChange={(e) => handleUpdateParsedCourseField(course.id, "score", e.target.value)}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-bold text-center bg-white"
+                                />
+                              </div>
+
+                              {/* Credit hours editing */}
+                              <div className="sm:col-span-1">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Cr</label>
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  value={course.credit}
+                                  onChange={(e) => handleUpdateParsedCourseField(course.id, "credit", e.target.value)}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold text-center bg-white"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Target Semester Config */}
+                  <div className="pt-2 border-t border-[#1A1A1A]/5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Target Semester</label>
+                      <select
+                        value={manageBacTargetTermId}
+                        onChange={(e) => setManageBacTargetTermId(e.target.value)}
+                        className="w-full p-2 border border-[#1A1A1A]/12 rounded text-xs font-semibold bg-white"
+                      >
+                        <option value="new">Create New Semester</option>
+                        {terms.map(t => (
+                          <option key={t.id} value={t.id}>{t.title}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {manageBacTargetTermId !== "new" && (
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Integration Mode</label>
+                        <div className="flex gap-4 mt-2">
+                          <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
+                            <input
+                              type="radio"
+                              name="mbMode"
+                              value="append"
+                              checked={manageBacImportMode === "append"}
+                              onChange={() => setManageBacImportMode("append")}
+                              className="text-[#1A1A1A] focus:ring-[#1A1A1A] w-3.5 h-3.5"
+                            />
+                            <span>Append courses</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
+                            <input
+                              type="radio"
+                              name="mbMode"
+                              value="replace"
+                              checked={manageBacImportMode === "replace"}
+                              onChange={() => setManageBacImportMode("replace")}
+                              className="text-[#1A1A1A] focus:ring-[#1A1A1A] w-3.5 h-3.5"
+                            />
+                            <span>Overwrite semester</span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={handleConfirmManageBacImport}
+                    className="w-full py-3 bg-[#1A1A1A] hover:bg-[#2D2D2D] text-white rounded font-bold uppercase text-xs tracking-wider transition-all"
+                  >
+                    Confirm Import ({parsedManageBacCourses.filter(c => selectedManageBacCourses[c.id]).length} Courses Checked)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Export Options Modal */}
       {isExportModelOpen && (
