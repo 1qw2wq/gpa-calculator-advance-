@@ -85,20 +85,57 @@ const predefinedCourseCategories: Record<string, string[]> = {
   ]
 };
 
+interface CourseSuggestion {
+  courseName: string;
+  category: string;
+}
+
+const allPredefinedSuggestions: CourseSuggestion[] = Object.entries(predefinedCourseCategories).flatMap(
+  ([category, courses]) => courses.map((courseName) => ({ courseName, category }))
+);
+
+const findCategoryForCourseName = (name: string): string | null => {
+  const normalized = name.trim().toLowerCase();
+  const matched = allPredefinedSuggestions.find((s) => s.courseName.toLowerCase() === normalized);
+  return matched ? matched.category : null;
+};
+
 const convertScoreToGradePoint = (score: number): number => {
-  if (score >= 97.1) return 4.33;
-  if (score >= 93.97) return 4.0;
-  if (score >= 90.93) return 3.63;
-  if (score >= 87.9) return 3.33;
-  if (score >= 83.37) return 3.0;
-  if (score >= 80.83) return 2.63;
-  if (score >= 77) return 2.33;
-  if (score >= 73) return 2.0;
-  if (score >= 70) return 1.67;
-  if (score >= 67) return 1.33;
-  if (score >= 63) return 1.0;
-  if (score >= 60) return 0.67;
+  if (isNaN(score) || score < 0) return 0.0;
+  if (score < 65) return 0.0;
+  
+  const interpolate = (val: number, sMin: number, sMax: number, gpMin: number, gpMax: number) => {
+    const clampedVal = Math.min(sMax, Math.max(sMin, val));
+    return gpMin + ((clampedVal - sMin) / (sMax - sMin)) * (gpMax - gpMin);
+  };
+
+  if (score >= 97) return 4.33;
+  if (score >= 93) return interpolate(score, 93, 96, 4.00, 4.32);
+  if (score >= 90) return interpolate(score, 90, 92, 3.67, 3.99);
+  if (score >= 87) return interpolate(score, 87, 89, 3.33, 3.66);
+  if (score >= 83) return interpolate(score, 83, 86, 3.00, 3.32);
+  if (score >= 80) return interpolate(score, 80, 82, 2.67, 2.99);
+  if (score >= 77) return interpolate(score, 77, 79, 2.33, 2.66);
+  if (score >= 73) return interpolate(score, 73, 76, 2.00, 2.32);
+  if (score >= 70) return interpolate(score, 70, 72, 1.67, 1.99);
+  if (score >= 65) return interpolate(score, 65, 69, 1.00, 1.66);
+  
   return 0.0;
+};
+
+const convertScoreToLetterGrade = (score: number): string => {
+  if (isNaN(score) || score < 0) return "—";
+  if (score >= 97) return "A+";
+  if (score >= 93) return "A";
+  if (score >= 90) return "A-";
+  if (score >= 87) return "B+";
+  if (score >= 83) return "B";
+  if (score >= 80) return "B-";
+  if (score >= 77) return "C+";
+  if (score >= 73) return "C";
+  if (score >= 70) return "C-";
+  if (score >= 65) return "D";
+  return "F";
 };
 
 export default function Home() {
@@ -470,9 +507,17 @@ export default function Home() {
   const handleSelectAutocompleteValue = (
     termId: string,
     courseId: string,
-    value: string
+    courseName: string,
+    category?: string
   ) => {
-    handleUpdateCourseField(termId, courseId, "courseName", value);
+    if (category) {
+      handleUpdateCourseFields(termId, courseId, {
+        courseName,
+        category
+      });
+    } else {
+      handleUpdateCourseField(termId, courseId, "courseName", courseName);
+    }
     setActiveSuggestionBox(null);
   };
 
@@ -1229,50 +1274,74 @@ export default function Home() {
                 {/* Grading Scale Table UI */}
                 <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10">
                   <div className="flex items-center gap-2 mb-4 border-b border-[#1A1A1A]/10 pb-3">
-                    <div className="bg-[#1A1A1A]/5 p-1.5 rounded text-[#1A1A1A] flex items-center justify-center">
+                    <div className="bg-[#1A1A1A]/5 p-1.5 rounded text-[#1A1A1A] flex items-center justify-center" style={{ color: currentAccent.color }}>
                       <span className="material-symbols-outlined text-[20px]">analytics</span>
                     </div>
-                    <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]">Grading Scale (4.33)</h3>
+                    <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]" style={{ color: currentAccent.color }}>Grading Scale (4.33)</h3>
                   </div>
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto max-h-[300px] overflow-y-auto pr-1">
                     <table className="w-full text-xs text-left text-slate-600">
-                      <thead className="text-[10px] text-slate-500 uppercase bg-[#F2F0ED]/50">
+                      <thead className="text-[10px] text-slate-500 uppercase bg-[#F2F0ED]/50 sticky top-0 z-10 backdrop-blur-sm">
                         <tr>
-                          <th className="px-3 py-2 rounded-l" scope="col">Range %</th>
+                          <th className="px-3 py-2 rounded-l" scope="col">Range</th>
+                          <th className="px-3 py-2" scope="col">Grade</th>
                           <th className="px-3 py-2 rounded-r text-right" scope="col">Points</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#1A1A1A]/5">
                         <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">97.1 - 100%</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">97 – 100</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">A+</td>
                           <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">4.33</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">94 - 97%</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">4.00</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">93 – 96</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">A</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">4.00 – 4.32</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">91 - 93%</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.63</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">90 – 92</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">A-</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.67 – 3.99</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">88 - 90%</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.33</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">87 – 89</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">B+</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.33 – 3.66</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">83 - 87%</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.00</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">83 – 86</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">B</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.00 – 3.32</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">81 - 83%</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.63</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">80 – 82</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">B-</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.67 – 2.99</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">77 - 80%</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.33</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">77 – 79</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">C+</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.33 – 2.66</td>
                         </tr>
                         <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">Below 60%</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">73 – 76</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">C</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.00 – 2.32</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">70 – 72</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">C-</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">1.67 – 1.99</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-800">65 – 69</td>
+                          <td className="px-3 py-2 font-bold text-slate-500">D</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">1.00 – 1.66</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3 py-2 font-medium text-slate-850">Below 65</td>
+                          <td className="px-3 py-2 font-bold text-red-500">F</td>
                           <td className="px-3 py-2 text-right font-bold text-red-650">0.00</td>
                         </tr>
                       </tbody>
@@ -1417,11 +1486,10 @@ export default function Home() {
                       {/* Course Card Grid Container */}
                       <div className="course-list flex flex-col gap-4 mb-4">
                         {term.courses.map((course) => {
-                          // Autocomplete suggestion filtering
+                          // Autocomplete suggestion filtering across ALL categories
                           const inputValue = course.courseName.toLowerCase();
-                          const categoryList = predefinedCourseCategories[course.category] || [];
-                          const matchingSuggestions = categoryList.filter((suggestion) =>
-                            suggestion.toLowerCase().includes(inputValue)
+                          const matchingSuggestions = allPredefinedSuggestions.filter((suggestion) =>
+                            suggestion.courseName.toLowerCase().includes(inputValue)
                           );
 
                           const isAutocompleteActive =
@@ -1433,10 +1501,10 @@ export default function Home() {
                           return (
                             <div
                               key={course.id}
-                              className="glass-card rounded-xl p-5 flex flex-col md:flex-row gap-4 items-start md:items-center group animate-fade-in relative z-10"
+                              className="glass-card rounded-xl p-5 flex flex-col md:flex-row gap-4 items-start md:items-center group animate-fade-in relative z-10 animate-fade-in"
                             >
                               {/* 1. Category Selector */}
-                              <div className="w-full md:w-[18%]">
+                              <div className="w-full md:w-[15%]">
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Category</label>
                                 <div className="relative">
                                   <select
@@ -1462,7 +1530,7 @@ export default function Home() {
                               </div>
 
                               {/* 2. Course Name with React Autocomplete Dropdown */}
-                              <div className="w-full md:w-[25%] relative">
+                              <div className="w-full md:w-[22%] relative">
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Course Name</label>
                                 <input
                                   type="text"
@@ -1470,7 +1538,16 @@ export default function Home() {
                                   placeholder="e.g. AP Calculus"
                                   value={course.courseName}
                                   onChange={(e) => {
-                                    handleUpdateCourseField(term.id, course.id, "courseName", e.target.value);
+                                    const val = e.target.value;
+                                    const detectedCategory = findCategoryForCourseName(val);
+                                    if (detectedCategory) {
+                                      handleUpdateCourseFields(term.id, course.id, {
+                                        courseName: val,
+                                        category: detectedCategory
+                                      });
+                                    } else {
+                                      handleUpdateCourseField(term.id, course.id, "courseName", val);
+                                    }
                                     setActiveSuggestionBox({ termId: term.id, courseId: course.id });
                                   }}
                                   onFocus={() => {
@@ -1487,15 +1564,17 @@ export default function Home() {
                                 {/* Interactive autocomplete matches popup */}
                                 {isAutocompleteActive && (
                                   <div className="autocomplete-dropdown block">
-                                    {matchingSuggestions.map((itemValue) => (
+                                    {matchingSuggestions.map((item) => (
                                       <div
-                                        key={itemValue}
+                                        key={`${item.courseName}-${item.category}`}
                                         onMouseDown={(e) => {
                                           e.preventDefault(); // Prevents triggers from firing on blur
-                                          handleSelectAutocompleteValue(term.id, course.id, itemValue);
+                                          handleSelectAutocompleteValue(term.id, course.id, item.courseName, item.category);
                                         }}
+                                        className="flex justify-between items-center py-1.5 px-2 hover:bg-slate-50 cursor-pointer"
                                       >
-                                        {itemValue}
+                                        <span className="font-medium text-slate-800">{item.courseName}</span>
+                                        <span className="text-[9px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase font-bold ml-2 shrink-0">{item.category}</span>
                                       </div>
                                     ))}
                                   </div>
@@ -1503,7 +1582,7 @@ export default function Home() {
                               </div>
 
                               {/* 3. Course Level Selector */}
-                              <div className="w-full md:w-[22%]">
+                              <div className="w-full md:w-[18%]">
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Course Level</label>
                                 <div className="relative">
                                   <select
@@ -1542,7 +1621,7 @@ export default function Home() {
                               </div>
 
                               {/* 4. Score Input (0-100) */}
-                              <div className="w-full md:w-[13%]">
+                              <div className="w-full md:w-[11%]">
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Score (%)</label>
                                 <input
                                   type="number"
@@ -1556,7 +1635,7 @@ export default function Home() {
                               </div>
 
                               {/* 5. Credit hours entry */}
-                              <div className="w-full md:w-[13%]">
+                              <div className="w-full md:w-[11%]">
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Credits</label>
                                 <input
                                   type="number"
@@ -1569,7 +1648,15 @@ export default function Home() {
                                 />
                               </div>
 
-                              {/* 6. Delete Row row button */}
+                              {/* 6. Dynamic Calculated Grade Badge */}
+                              <div className="w-full md:w-[15%]">
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Result Grade</label>
+                                <div className="bg-[#1A1A1A]/5 border border-[#1A1A1A]/5 rounded-lg py-2.5 px-3 text-xs font-bold text-center w-full" style={{ color: currentAccent.color }}>
+                                  {course.score ? `${convertScoreToLetterGrade(parseFloat(course.score))} (${convertScoreToGradePoint(parseFloat(course.score)).toFixed(2)})` : "—"}
+                                </div>
+                              </div>
+
+                              {/* 7. Delete Row button */}
                               <button
                                 onClick={() => handleDeleteCourse(term.id, course.id)}
                                 className="deleteBtn p-2 mt-4 md:mt-0 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all md:self-center ml-auto md:ml-0 focus:outline-none"
@@ -1766,45 +1853,54 @@ export default function Home() {
               </span>
             </div>
             
-            <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">97.1 - 100%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">4.33</div>
+             <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+              <div className="p-2.5 bg-slate-50 font-bold text-slate-500 rounded border border-[#1A1A1A]/5 text-center">Range %</div>
+              <div className="p-2.5 bg-slate-50 font-bold text-slate-500 rounded border border-[#1A1A1A]/5 text-center">Grade</div>
+              <div className="p-2.5 bg-slate-50 font-bold text-slate-500 rounded border border-[#1A1A1A]/5 text-center">GPA Points</div>
+
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">97 – 100</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">A+</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">4.33</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">94 - 97%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">4.00</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">93 – 96</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">A</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">4.00 – 4.32</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">91 - 93%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.63</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">90 – 92</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">A-</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.67 – 3.99</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">88 - 90%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.33</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">87 – 89</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">B+</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.33 – 3.66</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">83.37 - 87%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.00</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">83 – 86</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">B</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.00 – 3.32</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">81 - 83%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">2.63</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">80 – 82</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">B-</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">2.67 – 2.99</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">77 - 80%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">2.33</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">77 – 79</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">C+</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">2.33 – 2.66</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">73 - 76%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">2.00</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">73 – 76</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">C</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">2.00 – 2.32</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">70 - 72%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">1.67</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">70 – 72</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">C-</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">1.67 – 1.99</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">67 - 69%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">1.33</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">65 – 69</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">D</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">1.00 – 1.66</div>
               
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">63 - 66%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">1.00</div>
-              
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">60 - 62%</div>
-              <div className="p-3 bg-white text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">0.67</div>
-              
-              <div className="p-3 bg-white rounded border border-[#1A1A1A]/5 font-semibold">&lt; 60%</div>
-              <div className="p-3 bg-white text-red-650 font-bold rounded border border-[#1A1A1A]/10 text-center">0.00</div>
+              <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">Below 65</div>
+              <div className="p-2 text-red-500 font-bold rounded border border-[#1A1A1A]/10 text-center">F</div>
+              <div className="p-2 text-red-650 font-bold rounded border border-[#1A1A1A]/10 text-center">0.00</div>
             </div>
           </div>
         </div>
