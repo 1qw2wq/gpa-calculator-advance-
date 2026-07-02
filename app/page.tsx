@@ -100,9 +100,23 @@ const findCategoryForCourseName = (name: string): string | null => {
   return matched ? matched.category : null;
 };
 
-const convertScoreToGradePoint = (score: number): number => {
+const convertScoreToGradePoint = (score: number, useLinear: boolean = true): number => {
   if (isNaN(score) || score < 0) return 0.0;
   if (score < 65) return 0.0;
+  
+  if (!useLinear) {
+    if (score >= 97) return 4.33;
+    if (score >= 93) return 4.00;
+    if (score >= 90) return 3.67;
+    if (score >= 87) return 3.33;
+    if (score >= 83) return 3.00;
+    if (score >= 80) return 2.67;
+    if (score >= 77) return 2.33;
+    if (score >= 73) return 2.00;
+    if (score >= 70) return 1.67;
+    if (score >= 65) return 1.00;
+    return 0.0;
+  }
   
   const interpolate = (val: number, sMin: number, sMax: number, gpMin: number, gpMax: number) => {
     const clampedVal = Math.min(sMax, Math.max(sMin, val));
@@ -344,6 +358,7 @@ export default function Home() {
   const [manageBacImportMode, setManageBacImportMode] = useState<"append" | "replace">("append");
   const [scriptCopied, setScriptCopied] = useState<boolean>(false);
   const [roundScores, setRoundScores] = useState<boolean>(true);
+  const [useLinearGpa, setUseLinearGpa] = useState<boolean>(true);
 
   // Server-side AI mentoring helpers
   const [isGeneratingMentorAdvice, setIsGeneratingMentorAdvice] = useState<boolean>(false);
@@ -668,6 +683,11 @@ export default function Home() {
         setRoundScores(storedRoundScores === "true");
       }
 
+      const storedUseLinearGpa = localStorage.getItem("gpaTracker_useLinearGpa");
+      if (storedUseLinearGpa !== null) {
+        setUseLinearGpa(storedUseLinearGpa === "true");
+      }
+
       // Retrieve custom details
       const storedAccent = localStorage.getItem("gpaTracker_accent");
       if (storedAccent) setActiveAccent(storedAccent);
@@ -713,6 +733,11 @@ export default function Home() {
     handleParseManageBacInput(manageBacRawText, val);
   };
 
+  const syncUseLinearGpa = (val: boolean) => {
+    setUseLinearGpa(val);
+    localStorage.setItem("gpaTracker_useLinearGpa", String(val));
+  };
+
   // GPA calculation helper
   const getTotals = () => {
     let totalWeightedGradePoints = 0;
@@ -728,7 +753,7 @@ export default function Home() {
           if (roundScores) {
             score = Math.round(score);
           }
-          const gradePoint = convertScoreToGradePoint(score);
+          const gradePoint = convertScoreToGradePoint(score, useLinearGpa);
           
           let boost = 0;
           if (course.level === "Honors") {
@@ -1713,47 +1738,47 @@ export default function Home() {
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">93 – 96</td>
                           <td className="px-3 py-2 font-bold text-slate-500">A</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">4.00 – 4.32</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "4.00 – 4.32" : "4.00"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">90 – 92</td>
                           <td className="px-3 py-2 font-bold text-slate-500">A-</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.67 – 3.99</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.67 – 3.99" : "3.67"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">87 – 89</td>
                           <td className="px-3 py-2 font-bold text-slate-500">B+</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.33 – 3.66</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.33 – 3.66" : "3.33"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">83 – 86</td>
                           <td className="px-3 py-2 font-bold text-slate-500">B</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">3.00 – 3.32</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.00 – 3.32" : "3.00"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">80 – 82</td>
                           <td className="px-3 py-2 font-bold text-slate-500">B-</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.67 – 2.99</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.67 – 2.99" : "2.67"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">77 – 79</td>
                           <td className="px-3 py-2 font-bold text-slate-500">C+</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.33 – 2.66</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.33 – 2.66" : "2.33"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">73 – 76</td>
                           <td className="px-3 py-2 font-bold text-slate-500">C</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">2.00 – 2.32</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.00 – 2.32" : "2.00"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">70 – 72</td>
                           <td className="px-3 py-2 font-bold text-slate-500">C-</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">1.67 – 1.99</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "1.67 – 1.99" : "1.67"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-800">65 – 69</td>
                           <td className="px-3 py-2 font-bold text-slate-500">D</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">1.00 – 1.66</td>
+                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "1.00 – 1.66" : "1.00"}</td>
                         </tr>
                         <tr>
                           <td className="px-3 py-2 font-medium text-slate-850">Below 65</td>
@@ -1830,6 +1855,29 @@ export default function Home() {
                         />
                         <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1A1A1A]"
                              style={{ backgroundColor: roundScores ? currentAccent.color : undefined }}
+                        ></div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* GPA Calculation Mode Toggle */}
+                  <div className="pt-3 border-t border-[#1A1A1A]/5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col pr-4">
+                        <span className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-0.5 block">Linear GPA Scaling</span>
+                        <span className="text-[9.5px] text-slate-500 leading-snug">
+                          When enabled, grade points are calculated linearly within score ranges. When disabled, standard flat grade points (Normal) are used.
+                        </span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={useLinearGpa}
+                          onChange={(e) => syncUseLinearGpa(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1A1A1A]"
+                             style={{ backgroundColor: useLinearGpa ? currentAccent.color : undefined }}
                         ></div>
                       </label>
                     </div>
@@ -2094,7 +2142,7 @@ export default function Home() {
                                   {course.score ? (() => {
                                     const parsedVal = parseFloat(course.score);
                                     const displayVal = roundScores ? Math.round(parsedVal) : parsedVal;
-                                    return `${convertScoreToLetterGrade(displayVal)} (${convertScoreToGradePoint(displayVal).toFixed(2)})`;
+                                    return `${convertScoreToLetterGrade(displayVal)} (${convertScoreToGradePoint(displayVal, useLinearGpa).toFixed(2)})`;
                                   })() : "—"}
                                 </div>
                               </div>
@@ -2902,39 +2950,39 @@ export default function Home() {
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">93 – 96</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">A</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">4.00 – 4.32</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">{useLinearGpa ? "4.00 – 4.32" : "4.00"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">90 – 92</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">A-</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.67 – 3.99</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">{useLinearGpa ? "3.67 – 3.99" : "3.67"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">87 – 89</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">B+</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.33 – 3.66</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">{useLinearGpa ? "3.33 – 3.66" : "3.33"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">83 – 86</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">B</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">3.00 – 3.32</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">{useLinearGpa ? "3.00 – 3.32" : "3.00"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">80 – 82</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">B-</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">2.67 – 2.99</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">{useLinearGpa ? "2.67 – 2.99" : "2.67"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">77 – 79</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">C+</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">2.33 – 2.66</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">{useLinearGpa ? "2.33 – 2.66" : "2.33"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">73 – 76</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">C</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">2.00 – 2.32</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">{useLinearGpa ? "2.00 – 2.32" : "2.00"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">70 – 72</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">C-</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">1.67 – 1.99</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center">{useLinearGpa ? "1.67 – 1.99" : "1.67"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">65 – 69</div>
               <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">D</div>
-              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">1.00 – 1.66</div>
+              <div className="p-2 text-[#1A1A1A] font-bold rounded border border-[#1A1A1A]/10 text-center font-bold">{useLinearGpa ? "1.00 – 1.66" : "1.00"}</div>
               
               <div className="p-2 rounded border border-[#1A1A1A]/5 font-semibold text-center">Below 65</div>
               <div className="p-2 text-red-500 font-bold rounded border border-[#1A1A1A]/10 text-center">F</div>
