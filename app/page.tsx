@@ -2,6 +2,16 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import {
+  calculateUcGpa,
+  detectAgCategoryFromName,
+  scoreToUcGradePoint,
+  scoreToUcLetterGrade,
+  inferGradeLevelFromTermTitle,
+  AG_CATEGORIES,
+  type AgCategory,
+  type UcGpaSummary
+} from "../lib/uc-gpa";
 
 // Types matching the state representations
 interface Course {
@@ -12,11 +22,13 @@ interface Course {
   credit: string;
   level?: "Regular" | "Honors" | "AP/IB" | "Custom";
   weightBoost?: string;
+  agCategory?: AgCategory;
 }
 
 interface Term {
   id: string;
   title: string;
+  gradeLevel?: "9" | "10" | "11" | "12" | "Other";
   courses: Course[];
   reflection: string;       // Semester reflective diary notes
   bullets: string[];        // Tagged memories / key achievements
@@ -160,6 +172,7 @@ interface ScrapedCourse {
   category: string;
   level: "Regular" | "Honors" | "AP/IB" | "Custom";
   credit: string;
+  agCategory?: AgCategory;
 }
 
 const cleanAndMapCourse = (rawName: string, rawScore: string, roundScores: boolean = true): Omit<ScrapedCourse, "id"> => {
@@ -308,7 +321,8 @@ const cleanAndMapCourse = (rawName: string, rawScore: string, roundScores: boole
     score,
     category,
     level,
-    credit: "1.0"
+    credit: "1.0",
+    agCategory: detectAgCategoryFromName(mappedName)
   };
 };
 
@@ -359,6 +373,24 @@ export default function Home() {
   const [scriptCopied, setScriptCopied] = useState<boolean>(false);
   const [roundScores, setRoundScores] = useState<boolean>(true);
   const [useLinearGpa, setUseLinearGpa] = useState<boolean>(true);
+
+  // University of California (UC) Admissions Mode & Settings
+  const [useUcGpa, setUseUcGpa] = useState<boolean>(false);
+  const [isDetectingUcTypes, setIsDetectingUcTypes] = useState<boolean>(false);
+  const [customGeminiApiKey, setCustomGeminiApiKey] = useState<string>("");
+
+  // AI Transcript Scanner (Gemini 3.1 Flash-Lite) state variables
+  const [isAiTranscriptModalOpen, setIsAiTranscriptModalOpen] = useState<boolean>(false);
+  const [aiTranscriptInputMode, setAiTranscriptInputMode] = useState<"upload" | "paste">("upload");
+  const [aiTranscriptFile, setAiTranscriptFile] = useState<{ name: string; mimeType: string; base64: string } | null>(null);
+  const [aiTranscriptRawText, setAiTranscriptRawText] = useState<string>("");
+  const [isAiScanningTranscript, setIsAiScanningTranscript] = useState<boolean>(false);
+  const [aiExtractedData, setAiExtractedData] = useState<any | null>(null);
+  const [parsedAiCourses, setParsedAiCourses] = useState<(ScrapedCourse & { termTitle?: string; gradeLevel?: "9" | "10" | "11" | "12" | "Other" })[]>([]);
+  const [selectedAiCourses, setSelectedAiCourses] = useState<Record<string, boolean>>({});
+  const [aiTargetTermMode, setAiTargetTermMode] = useState<"auto" | "existing">("auto");
+  const [aiTargetTermId, setAiTargetTermId] = useState<string>("new");
+  const [aiImportMode, setAiImportMode] = useState<"append" | "replace">("append");
 
   // Server-side AI mentoring helpers
   const [isGeneratingMentorAdvice, setIsGeneratingMentorAdvice] = useState<boolean>(false);
@@ -626,11 +658,13 @@ export default function Home() {
       category: "Core Subjects",
       courseName: "",
       score: "",
-      credit: ""
+      credit: "",
+      agCategory: "G"
     };
     const defaultTerm: Term = {
       id: "term-1",
       title: "Semester 1",
+      gradeLevel: "9",
       courses: [defaultCourse],
       reflection: "",
       bullets: ["Set up my GPA tracker for the semester!"]
@@ -688,6 +722,16 @@ export default function Home() {
         setUseLinearGpa(storedUseLinearGpa === "true");
       }
 
+      const storedUseUcGpa = localStorage.getItem("gpaTracker_useUcGpa");
+      if (storedUseUcGpa !== null) {
+        setUseUcGpa(storedUseUcGpa === "true");
+      }
+
+      const storedApiKey = localStorage.getItem("gpaTracker_geminiApiKey");
+      if (storedApiKey) {
+        setCustomGeminiApiKey(storedApiKey);
+      }
+
       // Retrieve custom details
       const storedAccent = localStorage.getItem("gpaTracker_accent");
       if (storedAccent) setActiveAccent(storedAccent);
@@ -738,6 +782,16 @@ export default function Home() {
     localStorage.setItem("gpaTracker_useLinearGpa", String(val));
   };
 
+  const syncUseUcGpa = (val: boolean) => {
+    setUseUcGpa(val);
+    localStorage.setItem("gpaTracker_useUcGpa", String(val));
+  };
+
+  const syncCustomGeminiApiKey = (val: string) => {
+    setCustomGeminiApiKey(val);
+    localStorage.setItem("gpaTracker_geminiApiKey", val);
+  };
+
   // GPA calculation helper
   const getTotals = () => {
     let totalWeightedGradePoints = 0;
@@ -783,6 +837,19 @@ export default function Home() {
   };
 
   const totals = getTotals();
+  const ucTotals = calculateUcGpa(terms.map((t, idx) => ({
+    id: t.id,
+    title: t.title,
+    gradeLevel: t.gradeLevel || inferGradeLevelFromTermTitle(t.title, idx),
+    courses: t.courses.map(c => ({
+      id: c.id,
+      courseName: c.courseName,
+      score: c.score,
+      credit: c.credit,
+      level: c.level,
+      agCategory: c.agCategory || detectAgCategoryFromName(c.courseName)
+    }))
+  })));
   const currentAccent = INK_ACCENTS.find((p) => p.name === activeAccent) || INK_ACCENTS[0];
 
   // Target Graduation Calculations
@@ -805,16 +872,23 @@ export default function Home() {
       category: "Core Subjects",
       courseName: "",
       score: "",
-      credit: ""
+      credit: "",
+      agCategory: "G"
     };
     const newTerm: Term = {
       id: generateUniqueId("term"),
       title: `Semester ${nextTermNum}`,
+      gradeLevel: inferGradeLevelFromTermTitle(`Semester ${nextTermNum}`, terms.length),
       courses: [newCourse],
       reflection: "",
       bullets: []
     };
     const updated = [...terms, newTerm];
+    syncTerms(updated);
+  };
+
+  const handleUpdateTermGradeLevel = (termId: string, gradeLevel: "9" | "10" | "11" | "12" | "Other") => {
+    const updated = terms.map(t => t.id === termId ? { ...t, gradeLevel } : t);
     syncTerms(updated);
   };
 
@@ -1032,25 +1106,31 @@ export default function Home() {
     let fileName = "gpa_track_report";
 
     if (exportFormat === "csv") {
-      let csvRows = ["Term Name,Category,Course Name,Score,Credit Hours"];
+      let csvRows = ["Term Name,Grade Level,Category,Course Name,Level,UC A-G Area,Score,Credit Hours"];
 
-      terms.forEach((term) => {
+      terms.forEach((term, idx) => {
+        const gradeLvl = term.gradeLevel || inferGradeLevelFromTermTitle(term.title, idx);
         term.courses.forEach((course) => {
           const cat = course.category.replace(/"/g, '""');
           const name = course.courseName.replace(/"/g, '""');
+          const lvl = course.level || "Regular";
+          const ag = course.agCategory || detectAgCategoryFromName(course.courseName);
           const score = course.score;
           const cred = course.credit;
-          csvRows.push(`"${term.title}","${cat}","${name}","${score}","${cred}"`);
+          csvRows.push(`"${term.title}","Grade ${gradeLvl}","${cat}","${name}","${lvl}","${ag}","${score}","${cred}"`);
         });
       });
 
-      csvRows.push(`,,,GPA,${totals.gpa}`);
+      csvRows.push(`,,,Standard Weighted GPA,,${totals.gpa}`);
+      csvRows.push(`,,,UC Capped GPA,,${ucTotals.cappedWeightedGpa}`);
+      csvRows.push(`,,,UC Fully Weighted GPA,,${ucTotals.fullyWeightedGpa}`);
       fileContent = "data:text/csv;charset=utf-8," + encodeURIComponent(csvRows.join("\r\n"));
       fileName += ".csv";
     } else {
       // Plain text report
-      terms.forEach((term) => {
-        fileContent += `\n=== ${term.title} ===\n`;
+      terms.forEach((term, idx) => {
+        const gradeLvl = term.gradeLevel || inferGradeLevelFromTermTitle(term.title, idx);
+        fileContent += `\n=== ${term.title} (Grade ${gradeLvl}) ===\n`;
         if (term.reflection) {
           fileContent += `Reflection: ${term.reflection}\n`;
         }
@@ -1062,11 +1142,12 @@ export default function Home() {
         }
         fileContent += `Courses:\n`;
         term.courses.forEach((row) => {
-          fileContent += `${row.category} | ${row.courseName || "General"}: ${row.score}% (${row.credit} cr)\n`;
+          const ag = row.agCategory || detectAgCategoryFromName(row.courseName);
+          fileContent += `${row.category} | [UC: ${ag}] ${row.courseName || "General"} (${row.level || "Regular"}): ${row.score}% (${row.credit} cr)\n`;
         });
       });
 
-      fileContent += `\nFINAL CUMULATIVE GPA: ${totals.gpa}\nTOTAL CREDITS COMPLETED: ${totals.totalCredits}\n`;
+      fileContent += `\nSTANDARD CUMULATIVE GPA: ${totals.gpa}\nUC CAPPED WEIGHTED GPA: ${ucTotals.cappedWeightedGpa}\nUC FULLY WEIGHTED GPA: ${ucTotals.fullyWeightedGpa}\nUC UNWEIGHTED GPA: ${ucTotals.unweightedGpa}\nTOTAL CREDITS COMPLETED: ${totals.totalCredits}\n`;
       fileContent = "data:text/plain;charset=utf-8," + encodeURIComponent(fileContent);
       fileName += ".txt";
     }
@@ -1273,6 +1354,254 @@ export default function Home() {
     }
   };
 
+  // UC A-G Types Auto-Detection using Gemini 3.1 Flash-Lite
+  const handleAutoDetectUcTypes = async () => {
+    const allCoursesList: Array<{ id: string; courseName: string; currentLevel?: string; currentAg?: string }> = [];
+    terms.forEach(t => {
+      t.courses.forEach(c => {
+        if (c.courseName && c.courseName.trim()) {
+          allCoursesList.push({
+            id: c.id,
+            courseName: c.courseName.trim(),
+            currentLevel: c.level || "Regular",
+            currentAg: c.agCategory || detectAgCategoryFromName(c.courseName)
+          });
+        }
+      });
+    });
+
+    if (allCoursesList.length === 0) {
+      showAlert("No courses found to classify. Please enter some course names first.");
+      return;
+    }
+
+    setIsDetectingUcTypes(true);
+    try {
+      const response = await fetch("/api/uc-detect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(customGeminiApiKey ? { "x-gemini-api-key": customGeminiApiKey } : {})
+        },
+        body: JSON.stringify({
+          courses: allCoursesList,
+          customApiKey: customGeminiApiKey
+        })
+      });
+
+      const resData = await response.json();
+      if (!response.ok || resData.error) {
+        throw new Error(resData.message || resData.error || "Failed to classify courses.");
+      }
+
+      const classifications: Array<{
+        id: string;
+        courseName: string;
+        agCategory: AgCategory;
+        level: "Regular" | "Honors" | "AP/IB";
+        weightBoost: string;
+      }> = resData.data?.classifications || [];
+
+      const classMap = new Map<string, typeof classifications[0]>();
+      classifications.forEach(item => {
+        if (item.id) classMap.set(item.id, item);
+        if (item.courseName) classMap.set(item.courseName.toLowerCase().trim(), item);
+      });
+
+      let updatedCount = 0;
+      const updatedTerms = terms.map(t => ({
+        ...t,
+        courses: t.courses.map(c => {
+          const match = classMap.get(c.id) || classMap.get(c.courseName.toLowerCase().trim());
+          if (match) {
+            updatedCount++;
+            return {
+              ...c,
+              agCategory: match.agCategory,
+              level: match.level,
+              weightBoost: match.weightBoost || (match.level === "AP/IB" ? "1.0" : match.level === "Honors" ? "0.5" : "0.0")
+            };
+          }
+          return c;
+        })
+      }));
+
+      syncTerms(updatedTerms);
+      showAlert(`AI Classification Complete! Successfully evaluated ${updatedCount} courses with Gemini 3.1 Flash-Lite.`);
+    } catch (err: any) {
+      console.error("UC Auto-Detect Error:", err);
+      showAlert(`Classification error: ${err?.message || "Could not connect to AI service. Please check your API key."}`);
+    } finally {
+      setIsDetectingUcTypes(false);
+    }
+  };
+
+  // AI Transcript Scanner Handler using Gemini 3.1 Flash-Lite
+  const handleTriggerAiTranscriptScan = async () => {
+    if (!aiTranscriptRawText.trim() && !aiTranscriptFile) {
+      showAlert("Please upload a transcript document/image or paste transcript text first.");
+      return;
+    }
+
+    setIsAiScanningTranscript(true);
+    setParsedAiCourses([]);
+    setSelectedAiCourses({});
+
+    try {
+      const response = await fetch("/api/transcript-ai", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(customGeminiApiKey ? { "x-gemini-api-key": customGeminiApiKey } : {})
+        },
+        body: JSON.stringify({
+          text: aiTranscriptRawText,
+          fileData: aiTranscriptFile?.base64,
+          mimeType: aiTranscriptFile?.mimeType,
+          customApiKey: customGeminiApiKey
+        })
+      });
+
+      const resData = await response.json();
+      if (!response.ok || resData.error) {
+        throw new Error(resData.message || resData.error || "Transcript extraction failed.");
+      }
+
+      const extracted = resData.data;
+      setAiExtractedData(extracted);
+
+      const courseList: (ScrapedCourse & { termTitle?: string; gradeLevel?: "9" | "10" | "11" | "12" | "Other" })[] = [];
+      const selectMap: Record<string, boolean> = {};
+
+      const rawCourses = extracted.extractedCourses || [];
+      rawCourses.forEach((c: any, index: number) => {
+        const courseId = generateUniqueId(`ai-course-${index}`);
+        const parsedItem = {
+          id: courseId,
+          className: c.courseName || c.originalName || "Unnamed Course",
+          originalName: c.originalName || c.courseName || "",
+          score: String(c.score || "95"),
+          category: c.category || "Core Subjects",
+          level: (c.level as any) || (c.courseName?.toLowerCase().includes("ap") ? "AP/IB" : c.courseName?.toLowerCase().includes("honors") ? "Honors" : "Regular"),
+          credit: String(c.credit || "1.0"),
+          agCategory: (c.agCategory as AgCategory) || detectAgCategoryFromName(c.courseName || ""),
+          termTitle: c.termTitle || "Semester 1",
+          gradeLevel: c.gradeLevel || "10"
+        };
+        courseList.push(parsedItem);
+        selectMap[courseId] = true;
+      });
+
+      setParsedAiCourses(courseList);
+      setSelectedAiCourses(selectMap);
+    } catch (err: any) {
+      console.error("AI Transcript Scan Error:", err);
+      showAlert(`Scan Error: ${err?.message || "Failed to analyze transcript. Please verify your GEMINI_API_KEY."}`);
+    } finally {
+      setIsAiScanningTranscript(false);
+    }
+  };
+
+  const handleConfirmAiTranscriptImport = () => {
+    const selected = parsedAiCourses.filter(c => selectedAiCourses[c.id]);
+    if (selected.length === 0) {
+      showAlert("Please select at least one course to import.");
+      return;
+    }
+
+    if (aiTargetTermMode === "auto" && aiExtractedData?.terms && aiExtractedData.terms.length > 0) {
+      // Group courses by their detected terms
+      const newTermsToAdd: Term[] = [];
+      aiExtractedData.terms.forEach((termData: any, idx: number) => {
+        const termCourses = selected.filter(c => c.termTitle === termData.termTitle);
+        if (termCourses.length > 0) {
+          const coursesToInsert: Course[] = termCourses.map(c => ({
+            id: generateUniqueId("course"),
+            category: c.category,
+            courseName: c.className,
+            score: c.score,
+            credit: c.credit,
+            level: c.level,
+            weightBoost: c.level === "AP/IB" ? "1.0" : c.level === "Honors" ? "0.5" : "0.0",
+            agCategory: c.agCategory
+          }));
+
+          newTermsToAdd.push({
+            id: generateUniqueId("term"),
+            title: termData.termTitle || `Semester ${terms.length + idx + 1}`,
+            gradeLevel: termData.gradeLevel || inferGradeLevelFromTermTitle(termData.termTitle || "", terms.length + idx),
+            courses: coursesToInsert,
+            reflection: "Imported via Gemini 3.1 Flash-Lite Transcript Scanner.",
+            bullets: [`Imported ${coursesToInsert.length} courses from official transcript.`]
+          });
+        }
+      });
+
+      if (newTermsToAdd.length > 0) {
+        const updated = [...terms, ...newTermsToAdd];
+        syncTerms(updated);
+        showAlert(`Successfully auto-created ${newTermsToAdd.length} semesters and imported ${selected.length} courses!`);
+        setIsAiTranscriptModalOpen(false);
+        setParsedAiCourses([]);
+        setAiTranscriptFile(null);
+        setAiTranscriptRawText("");
+        return;
+      }
+    }
+
+    // Default or existing term import
+    const coursesToInsert: Course[] = selected.map(c => ({
+      id: generateUniqueId("course"),
+      category: c.category,
+      courseName: c.className,
+      score: c.score,
+      credit: c.credit,
+      level: c.level,
+      weightBoost: c.level === "AP/IB" ? "1.0" : c.level === "Honors" ? "0.5" : "0.0",
+      agCategory: c.agCategory
+    }));
+
+    if (aiTargetTermId === "new") {
+      const nextTermNum = terms.length + 1;
+      const newTerm: Term = {
+        id: generateUniqueId("term"),
+        title: `Semester ${nextTermNum} (AI Transcript Import)`,
+        gradeLevel: inferGradeLevelFromTermTitle(`Semester ${nextTermNum}`, terms.length),
+        courses: coursesToInsert,
+        reflection: "Imported via Gemini 3.1 Flash-Lite Transcript Scanner.",
+        bullets: [`Imported ${coursesToInsert.length} courses.`]
+      };
+      syncTerms([...terms, newTerm]);
+      showAlert(`Created Semester ${nextTermNum} with ${coursesToInsert.length} courses!`);
+    } else {
+      const updated = terms.map(term => {
+        if (term.id === aiTargetTermId) {
+          if (aiImportMode === "replace") {
+            return {
+              ...term,
+              courses: coursesToInsert,
+              bullets: [...term.bullets, `Replaced with ${coursesToInsert.length} AI-imported courses.`]
+            };
+          } else {
+            return {
+              ...term,
+              courses: [...term.courses, ...coursesToInsert],
+              bullets: [...term.bullets, `Added ${coursesToInsert.length} AI-imported courses.`]
+            };
+          }
+        }
+        return term;
+      });
+      syncTerms(updated);
+      showAlert(`Updated semester with ${coursesToInsert.length} courses!`);
+    }
+
+    setIsAiTranscriptModalOpen(false);
+    setParsedAiCourses([]);
+    setAiTranscriptFile(null);
+    setAiTranscriptRawText("");
+  };
+
   const toggleHomeView = (val: boolean) => {
     setShowIntro(val);
     localStorage.setItem("gpaTracker_showIntro", String(val));
@@ -1330,6 +1659,16 @@ export default function Home() {
               >
                 <span className="material-symbols-outlined text-[18px]">upload</span>
                 <span className="hidden sm:inline">Import</span>
+              </button>
+
+              <button
+                onClick={() => setIsAiTranscriptModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs uppercase tracking-wider font-bold text-slate-800 bg-amber-50/80 hover:bg-amber-100/90 rounded-xl transition-all border border-amber-300/60 shadow-sm"
+                id="aiTranscriptBtn"
+                title="AI Transcript Scanner (Gemini 3.1 Flash-Lite)"
+              >
+                <span className="material-symbols-outlined text-[18px] text-amber-600">auto_awesome</span>
+                <span>AI Transcript</span>
               </button>
 
               <button
@@ -1678,27 +2017,97 @@ export default function Home() {
               {/* LEFT COLUMN: Sticky Hero Stats & Grading Scale Table */}
               <section className="lg:col-span-5 lg:sticky lg:top-28 flex flex-col gap-6">
                 
+                {/* UC Mode Activation Toggle Bar */}
+                <div className="glass-panel rounded-2xl p-4 border border-[#1A1A1A]/10 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-amber-500/10 text-amber-800">
+                      <span className="material-symbols-outlined text-[20px]">school</span>
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">UC Admissions GPA Mode</div>
+                      <div className="text-[10px] text-slate-500">Calculate official University of California Capped & Weighted GPAs</div>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={useUcGpa}
+                      onChange={(e) => syncUseUcGpa(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#1A1A1A]"
+                         style={{ backgroundColor: useUcGpa ? currentAccent.color : undefined }}
+                    ></div>
+                  </label>
+                </div>
+
                 {/* Main GPA Display Card */}
                 <div className="glass-panel rounded-2xl p-8 flex flex-col items-center text-center relative overflow-hidden border border-[#1A1A1A]/10">
-                  <h1 className="text-7xl lg:text-8xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
-                    {totals.gpa}
-                  </h1>
-                  <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">Weighted GPA</p>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Unweighted GPA &bull; <span style={{ color: currentAccent.color }}>{totals.unweightedGpa}</span>
-                  </div>
+                  {useUcGpa ? (
+                    <>
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100/70 border border-amber-300/60 text-amber-900 text-[10px] font-bold uppercase tracking-widest mb-3">
+                        <span className="material-symbols-outlined text-[13px]">verified</span>
+                        <span>UC Admissions Benchmark</span>
+                      </div>
+                      <h1 className="text-7xl lg:text-8xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                        {ucTotals.cappedWeightedGpa}
+                      </h1>
+                      <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">Capped Weighted GPA</p>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-center gap-2 mt-1">
+                        <span>Fully Weighted: <strong className="text-slate-800">{ucTotals.fullyWeightedGpa}</strong></span>
+                        <span>&bull;</span>
+                        <span>Unweighted: <strong className="text-slate-800">{ucTotals.unweightedGpa}</strong></span>
+                      </div>
 
-                  {/* Stats Grid */}
-                  <div className="grid grid-cols-2 gap-4 w-full mt-6">
-                    <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
-                      <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Total Credits</span>
-                      <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>{totals.totalCredits}</span>
-                    </div>
-                    <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
-                      <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Quality Points</span>
-                      <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.qualityPoints}</span>
-                    </div>
-                  </div>
+                      {/* UC Stats Grid */}
+                      <div className="grid grid-cols-2 gap-4 w-full mt-6">
+                        <div className="bg-white border border-[#1A1A1A]/10 p-3.5 rounded flex flex-col items-center gap-1">
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">10th-11th A-G Credits</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>{ucTotals.tenthEleventhCredits}</span>
+                        </div>
+                        <div className="bg-white border border-[#1A1A1A]/10 p-3.5 rounded flex flex-col items-center gap-1">
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Honors Cap Used</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{ucTotals.honorsPointsApplied} / 8</span>
+                        </div>
+                      </div>
+
+                      <div className="w-full mt-3 p-2 bg-slate-50 border border-slate-200/60 rounded text-[9.5px] text-slate-600 text-left space-y-1">
+                        <div className="flex justify-between">
+                          <span>10th Grade Honors Bonus:</span>
+                          <strong>{ucTotals.honorsTenthGradeApplied} / 4 max</strong>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>11th Grade Honors Bonus:</span>
+                          <strong>{ucTotals.honorsEleventhGradeApplied} / 4 max</strong>
+                        </div>
+                        <div className="text-[9px] text-slate-400 pt-1 border-t border-slate-200">
+                          Flat 4.0 scale (A=4, B=3, C=2, D=1, F=0). Pluses/minuses ignored per UC policy.
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <h1 className="text-7xl lg:text-8xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                        {totals.gpa}
+                      </h1>
+                      <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">Weighted GPA</p>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Unweighted GPA &bull; <span style={{ color: currentAccent.color }}>{totals.unweightedGpa}</span>
+                      </div>
+
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-2 gap-4 w-full mt-6">
+                        <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Total Credits</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>{totals.totalCredits}</span>
+                        </div>
+                        <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Quality Points</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.qualityPoints}</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   <hr className="w-full border-[#1A1A1A]/10 my-5" />
 
@@ -1712,89 +2121,151 @@ export default function Home() {
                   </button>
                 </div>
 
-                {/* Grading Scale Table UI */}
-                <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10">
-                  <div className="flex items-center gap-2 mb-4 border-b border-[#1A1A1A]/10 pb-3">
-                    <div className="bg-[#1A1A1A]/5 p-1.5 rounded text-[#1A1A1A] flex items-center justify-center" style={{ color: currentAccent.color }}>
-                      <span className="material-symbols-outlined text-[20px]">analytics</span>
+                {/* UC A-G Requirement Tracker OR Grading Scale Table */}
+                {useUcGpa ? (
+                  <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10">
+                    <div className="flex items-center justify-between mb-4 border-b border-[#1A1A1A]/10 pb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="bg-[#1A1A1A]/5 p-1.5 rounded text-[#1A1A1A] flex items-center justify-center" style={{ color: currentAccent.color }}>
+                          <span className="material-symbols-outlined text-[20px]">assignment_turned_in</span>
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]" style={{ color: currentAccent.color }}>A-G Subject Progress</h3>
+                          <div className="text-[9px] text-slate-500">UC minimum high school requirements</div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleAutoDetectUcTypes}
+                        disabled={isDetectingUcTypes}
+                        className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white flex items-center gap-1 transition-all disabled:opacity-50"
+                        title="Auto-classify courses with Gemini 3.1 Flash-Lite"
+                      >
+                        <span className={`material-symbols-outlined text-[14px] ${isDetectingUcTypes ? "animate-spin" : "text-amber-300"}`}>
+                          {isDetectingUcTypes ? "progress_activity" : "auto_awesome"}
+                        </span>
+                        <span>{isDetectingUcTypes ? "Classifying..." : "Auto-Detect (AI)"}</span>
+                      </button>
                     </div>
-                    <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]" style={{ color: currentAccent.color }}>Grading Scale (4.33)</h3>
+
+                    <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">
+                      {ucTotals.agProgress.map((item) => {
+                        const pct = Math.min(100, Math.round((item.completedCredits / (item.requiredCredits || 1)) * 100));
+                        return (
+                          <div key={item.code} className="p-2.5 bg-white/70 border border-[#1A1A1A]/5 rounded-lg">
+                            <div className="flex items-center justify-between text-xs mb-1">
+                              <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                                <span className="w-5 h-5 rounded-full bg-[#1A1A1A] text-white flex items-center justify-center text-[10px] font-mono">
+                                  {item.code}
+                                </span>
+                                <span>{item.name}</span>
+                              </span>
+                              <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${item.isSatisfied ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
+                                {item.completedCredits} / {item.requiredCredits} yrs {item.isSatisfied ? '✔' : ''}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-1.5 rounded-full transition-all duration-300 ${item.isSatisfied ? 'bg-emerald-500' : 'bg-[#1A1A1A]'}`}
+                                style={{ width: `${pct}%`, backgroundColor: item.isSatisfied ? undefined : currentAccent.color }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {ucTotals.totalNonAgCredits > 0 && (
+                      <div className="mt-3 p-2 bg-slate-50 border border-slate-200/60 rounded text-[9.5px] text-slate-500 flex items-center justify-between">
+                        <span>Non-A-G Credits (e.g. PE, Health):</span>
+                        <strong>{ucTotals.totalNonAgCredits} Cr (Excluded)</strong>
+                      </div>
+                    )}
                   </div>
-                  <div className="overflow-x-auto max-h-[300px] overflow-y-auto pr-1">
-                    <table className="w-full text-xs text-left text-slate-600">
-                      <thead className="text-[10px] text-slate-500 uppercase bg-[#F2F0ED]/50 sticky top-0 z-10 backdrop-blur-sm">
-                        <tr>
-                          <th className="px-3 py-2 rounded-l" scope="col">Range</th>
-                          <th className="px-3 py-2" scope="col">Grade</th>
-                          <th className="px-3 py-2 rounded-r text-right" scope="col">Points</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[#1A1A1A]/5">
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">97 – 100</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">A+</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">4.33</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">93 – 96</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">A</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "4.00 – 4.32" : "4.00"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">90 – 92</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">A-</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.67 – 3.99" : "3.67"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">87 – 89</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">B+</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.33 – 3.66" : "3.33"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">83 – 86</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">B</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.00 – 3.32" : "3.00"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">80 – 82</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">B-</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.67 – 2.99" : "2.67"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">77 – 79</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">C+</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.33 – 2.66" : "2.33"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">73 – 76</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">C</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.00 – 2.32" : "2.00"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">70 – 72</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">C-</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "1.67 – 1.99" : "1.67"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-800">65 – 69</td>
-                          <td className="px-3 py-2 font-bold text-slate-500">D</td>
-                          <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "1.00 – 1.66" : "1.00"}</td>
-                        </tr>
-                        <tr>
-                          <td className="px-3 py-2 font-medium text-slate-850">Below 65</td>
-                          <td className="px-3 py-2 font-bold text-red-500">F</td>
-                          <td className="px-3 py-2 text-right font-bold text-red-650">0.00</td>
-                        </tr>
-                      </tbody>
-                    </table>
+                ) : (
+                  /* Grading Scale Table UI */
+                  <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10">
+                    <div className="flex items-center gap-2 mb-4 border-b border-[#1A1A1A]/10 pb-3">
+                      <div className="bg-[#1A1A1A]/5 p-1.5 rounded text-[#1A1A1A] flex items-center justify-center" style={{ color: currentAccent.color }}>
+                        <span className="material-symbols-outlined text-[20px]">analytics</span>
+                      </div>
+                      <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]" style={{ color: currentAccent.color }}>Grading Scale (4.33)</h3>
+                    </div>
+                    <div className="overflow-x-auto max-h-[300px] overflow-y-auto pr-1">
+                      <table className="w-full text-xs text-left text-slate-600">
+                        <thead className="text-[10px] text-slate-500 uppercase bg-[#F2F0ED]/50 sticky top-0 z-10 backdrop-blur-sm">
+                          <tr>
+                            <th className="px-3 py-2 rounded-l" scope="col">Range</th>
+                            <th className="px-3 py-2" scope="col">Grade</th>
+                            <th className="px-3 py-2 rounded-r text-right" scope="col">Points</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#1A1A1A]/5">
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">97 – 100</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">A+</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">4.33</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">93 – 96</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">A</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "4.00 – 4.32" : "4.00"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">90 – 92</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">A-</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.67 – 3.99" : "3.67"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">87 – 89</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">B+</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.33 – 3.66" : "3.33"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">83 – 86</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">B</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "3.00 – 3.32" : "3.00"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">80 – 82</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">B-</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.67 – 2.99" : "2.67"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">77 – 79</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">C+</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.33 – 2.66" : "2.33"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">73 – 76</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">C</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "2.00 – 2.32" : "2.00"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">70 – 72</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">C-</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "1.67 – 1.99" : "1.67"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-800">65 – 69</td>
+                            <td className="px-3 py-2 font-bold text-slate-500">D</td>
+                            <td className="px-3 py-2 text-right font-bold text-[#1A1A1A]">{useLinearGpa ? "1.00 – 1.66" : "1.00"}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-3 py-2 font-medium text-slate-850">Below 65</td>
+                            <td className="px-3 py-2 font-bold text-red-500">F</td>
+                            <td className="px-3 py-2 text-right font-bold text-red-650">0.00</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <button
+                      onClick={() => setIsScaleModalOpen(true)}
+                      className="w-full mt-3 text-[10px] uppercase tracking-wider text-center text-slate-500 hover:text-[#1A1A1A] transition-colors focus:outline-none"
+                    >
+                      View All Ranges
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setIsScaleModalOpen(true)}
-                    className="w-full mt-3 text-[10px] uppercase tracking-wider text-center text-slate-500 hover:text-[#1A1A1A] transition-colors focus:outline-none"
-                  >
-                    View All Ranges
-                  </button>
-                </div>
+                )}
 
                 {/* Academic Customization Card */}
                 <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10 mt-6 animate-fade-in">
@@ -1883,6 +2354,53 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* UC Mode Toggle in Customizer */}
+                  <div className="pt-3 border-t border-[#1A1A1A]/5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-col pr-4">
+                        <span className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-0.5 block">UC Admissions GPA Mode</span>
+                        <span className="text-[9.5px] text-slate-500 leading-snug">
+                          Activate University of California 10th-11th grade calculation with A-G subject tracking & 8-semester honors cap.
+                        </span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer select-none shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={useUcGpa}
+                          onChange={(e) => syncUseUcGpa(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1A1A1A]"
+                             style={{ backgroundColor: useUcGpa ? currentAccent.color : undefined }}
+                        ></div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Gemini API Key Setting */}
+                  <div className="pt-3 border-t border-[#1A1A1A]/5">
+                    <label className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-1 block">Gemini API Key (Optional Override)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        placeholder="AIzaSy... (leave blank to use server environment)"
+                        value={customGeminiApiKey}
+                        onChange={(e) => syncCustomGeminiApiKey(e.target.value)}
+                        className="flex-grow p-1.5 text-xs border border-[#1A1A1A]/10 rounded bg-white focus:outline-none font-mono"
+                      />
+                      {customGeminiApiKey && (
+                        <button
+                          type="button"
+                          onClick={() => syncCustomGeminiApiKey("")}
+                          className="px-2 py-1 text-[10px] text-slate-500 hover:text-red-500 rounded border border-[#1A1A1A]/10"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <span className="text-[9px] text-slate-400 mt-1 block">Used for Gemini 3.1 Flash-Lite transcript parsing and UC type auto-detection.</span>
+                  </div>
+
                   {/* 2. Custom Category Addition */}
                   <div className="pt-3 border-t border-[#1A1A1A]/5">
                     <label className="text-[9px] uppercase tracking-wider font-bold text-slate-500 mb-1.5 block">Create Customized Course Category</label>
@@ -1949,7 +2467,7 @@ export default function Home() {
                     <div key={term.id} className="term-block animate-fade-in py-1">
                       
                       {/* Term Header Layout */}
-                      <div className="flex items-center gap-2 mb-4 group relative">
+                      <div className="flex flex-wrap items-center gap-3 mb-4 group relative">
                         <input
                           type="text"
                           value={term.title}
@@ -1960,6 +2478,29 @@ export default function Home() {
                         <span className="material-symbols-outlined text-slate-400 text-[18px] opacity-0 group-hover:opacity-100 transition-opacity">
                           edit
                         </span>
+
+                        {/* Grade Level Selector */}
+                        <div className="flex items-center gap-1.5 ml-1">
+                          <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Grade:</label>
+                          <select
+                            value={term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)}
+                            onChange={(e) => handleUpdateTermGradeLevel(term.id, e.target.value as any)}
+                            className="text-[10px] font-bold py-1 px-2 border border-[#1A1A1A]/10 rounded bg-white/80 text-slate-700 cursor-pointer focus:outline-none"
+                          >
+                            <option value="9">Grade 9</option>
+                            <option value="10">Grade 10</option>
+                            <option value="11">Grade 11</option>
+                            <option value="12">Grade 12</option>
+                            <option value="Other">Other</option>
+                          </select>
+
+                          {useUcGpa && ((term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)) === "10" || (term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)) === "11") && (
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-300/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[11px] text-amber-600">verified</span>
+                              <span>Counted in UC GPA</span>
+                            </span>
+                          )}
+                        </div>
 
                         <button
                           onClick={() => handleDeleteTerm(term.id)}
@@ -1991,7 +2532,7 @@ export default function Home() {
                               className="glass-card rounded-xl p-5 flex flex-col md:flex-row gap-4 items-start md:items-center group animate-fade-in relative z-10 animate-fade-in"
                             >
                               {/* 1. Category Selector */}
-                              <div className="w-full md:w-[15%]">
+                              <div className={`w-full ${useUcGpa ? "md:w-[13%]" : "md:w-[15%]"}`}>
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Category</label>
                                 <div className="relative">
                                   <select
@@ -2015,6 +2556,35 @@ export default function Home() {
                                   </div>
                                 </div>
                               </div>
+
+                              {/* UC A-G Area Selector (Shown when UC Mode is active) */}
+                              {useUcGpa && (
+                                <div className="w-full md:w-[13%]">
+                                  <label className="text-[9px] uppercase tracking-wider font-bold text-amber-800 ml-1 mb-1 flex items-center justify-between">
+                                    <span>UC A-G</span>
+                                    <span className="text-[8px] font-mono px-1 rounded bg-amber-100 text-amber-900 font-bold">{course.agCategory || detectAgCategoryFromName(course.courseName)}</span>
+                                  </label>
+                                  <div className="relative">
+                                    <select
+                                      value={course.agCategory || detectAgCategoryFromName(course.courseName)}
+                                      onChange={(e) => handleUpdateCourseField(term.id, course.id, "agCategory", e.target.value)}
+                                      className="w-full modern-input rounded-lg text-xs font-semibold text-slate-800 py-2.5 pl-2 pr-6 appearance-none cursor-pointer focus:outline-none focus:border-[#1A1A1A]"
+                                    >
+                                      <option value="A">A: History</option>
+                                      <option value="B">B: English</option>
+                                      <option value="C">C: Math</option>
+                                      <option value="D">D: Science</option>
+                                      <option value="E">E: Language</option>
+                                      <option value="F">F: Arts</option>
+                                      <option value="G">G: Elective</option>
+                                      <option value="Non-AG">Non-A-G (PE)</option>
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1 text-slate-500">
+                                      <span className="material-symbols-outlined text-[16px]">expand_more</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
 
                               {/* 2. Course Name with React Autocomplete Dropdown */}
                               <div className="w-full md:w-[22%] relative">
@@ -2136,12 +2706,24 @@ export default function Home() {
                               </div>
 
                               {/* 6. Dynamic Calculated Grade Badge */}
-                              <div className="w-full md:w-[15%]">
-                                <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Result Grade</label>
+                              <div className={`w-full ${useUcGpa ? "md:w-[14%]" : "md:w-[15%]"}`}>
+                                <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">
+                                  {useUcGpa ? "UC Grade Pts" : "Result Grade"}
+                                </label>
                                 <div className="bg-[#1A1A1A]/5 border border-[#1A1A1A]/5 rounded-lg py-2.5 px-3 text-xs font-bold text-center w-full" style={{ color: currentAccent.color }}>
                                   {course.score ? (() => {
                                     const parsedVal = parseFloat(course.score);
                                     const displayVal = roundScores ? Math.round(parsedVal) : parsedVal;
+                                    if (useUcGpa) {
+                                      const agCat = course.agCategory || detectAgCategoryFromName(course.courseName);
+                                      if (agCat === "Non-AG") {
+                                        return "Excluded (PE)";
+                                      }
+                                      const baseUcPoint = scoreToUcGradePoint(displayVal);
+                                      const isHonors = (course.level === "AP/IB" || course.level === "Honors") && baseUcPoint >= 2.0;
+                                      const totalPoint = baseUcPoint + (isHonors ? 1.0 : 0.0);
+                                      return `${scoreToUcLetterGrade(displayVal)} (${totalPoint.toFixed(1)}${isHonors ? ' ✦' : ''})`;
+                                    }
                                     return `${convertScoreToLetterGrade(displayVal)} (${convertScoreToGradePoint(displayVal, useLinearGpa).toFixed(2)})`;
                                   })() : "—"}
                                 </div>
@@ -2271,8 +2853,404 @@ export default function Home() {
       </div>
 
       {/* ========================================================
-         MODALS (Export, Full Scale, and Committing Snapshot)
+         MODALS (AI Transcript, ManageBac, Export, Full Scale, etc.)
          ======================================================== */}
+
+      {/* AI Transcript Scanner Modal (Gemini 3.1 Flash-Lite) */}
+      {isAiTranscriptModalOpen && (
+        <div className="modal block">
+          <div className="modal-content rounded-xl p-6 relative border border-[#1A1A1A]/15 shadow-xl max-w-3xl max-h-[92vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center mb-5 pb-3 border-b border-[#1A1A1A]/10">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center text-amber-700">
+                  <span className="material-symbols-outlined text-[20px]">auto_awesome</span>
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold uppercase tracking-[0.15em] text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                    AI Transcript Scanner
+                  </h2>
+                  <span className="text-[10px] text-amber-800 font-mono font-medium">
+                    Powered by Gemini 3.1 Flash-Lite
+                  </span>
+                </div>
+              </div>
+              <span
+                onClick={() => {
+                  setIsAiTranscriptModalOpen(false);
+                  setIsAiScanningTranscript(false);
+                }}
+                className="cursor-pointer text-2xl text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                &times;
+              </span>
+            </div>
+
+            <div className="space-y-6 font-sans">
+              {/* Step 1: Input method tabs */}
+              <div className="p-4 bg-white/70 border border-[#1A1A1A]/10 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                    <span className="bg-[#1A1A1A] text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]">1</span>
+                    <span>Provide Transcript File or Text</span>
+                  </h3>
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg border border-[#1A1A1A]/5">
+                    <button
+                      type="button"
+                      onClick={() => setAiTranscriptInputMode("upload")}
+                      className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all ${
+                        aiTranscriptInputMode === "upload" ? "bg-white shadow-xs text-slate-900" : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Document / Image
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAiTranscriptInputMode("paste")}
+                      className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all ${
+                        aiTranscriptInputMode === "paste" ? "bg-white shadow-xs text-slate-900" : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Paste Text
+                    </button>
+                  </div>
+                </div>
+
+                {aiTranscriptInputMode === "upload" ? (
+                  <div className="space-y-3">
+                    <label
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            const result = reader.result as string;
+                            const base64 = result.includes(",") ? result.split(",")[1] : result;
+                            setAiTranscriptFile({
+                              name: file.name,
+                              mimeType: file.type || "application/pdf",
+                              base64
+                            });
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="border-2 border-dashed border-[#1A1A1A]/20 hover:border-[#1A1A1A]/50 bg-white/60 hover:bg-white rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all group"
+                    >
+                      <input
+                        type="file"
+                        accept=".pdf,image/png,image/jpeg,image/webp,image/jpg"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                              const result = reader.result as string;
+                              const base64 = result.includes(",") ? result.split(",")[1] : result;
+                              setAiTranscriptFile({
+                                name: file.name,
+                                mimeType: file.type || "application/pdf",
+                                base64
+                              });
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <span className="material-symbols-outlined text-4xl text-slate-400 group-hover:text-[#1A1A1A] group-hover:scale-110 transition-all mb-2">
+                        upload_file
+                      </span>
+                      <span className="text-xs font-bold text-slate-800">
+                        {aiTranscriptFile ? aiTranscriptFile.name : "Click to select or drag & drop transcript"}
+                      </span>
+                      <span className="text-[10px] text-slate-500 mt-1">
+                        Supports PDF transcripts, screenshots, or report card photos (PDF, PNG, JPG, WEBP)
+                      </span>
+                    </label>
+
+                    {aiTranscriptFile && (
+                      <div className="flex items-center justify-between p-2.5 bg-emerald-50 border border-emerald-200/80 rounded-lg text-xs text-emerald-900">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="material-symbols-outlined text-[18px] text-emerald-700">check_circle</span>
+                          <span className="font-semibold truncate">{aiTranscriptFile.name}</span>
+                          <span className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                            {aiTranscriptFile.mimeType}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setAiTranscriptFile(null)}
+                          className="text-xs text-emerald-700 hover:text-red-600 font-bold ml-2"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <textarea
+                      value={aiTranscriptRawText}
+                      onChange={(e) => setAiTranscriptRawText(e.target.value)}
+                      placeholder="Paste your transcript text, student portal course table, or report card summary here..."
+                      className="w-full h-28 p-3 font-mono text-[11px] bg-white border border-[#1A1A1A]/15 rounded-lg focus:outline-none focus:border-[#1A1A1A] resize-none"
+                    />
+                  </div>
+                )}
+
+                {/* Gemini API Key setting hint */}
+                <div className="pt-2 border-t border-[#1A1A1A]/5 flex items-center justify-between text-[10px] text-slate-500">
+                  <span className="flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px] text-amber-600">key</span>
+                    <span>API Key: {customGeminiApiKey ? "Custom key active" : "Server GEMINI_API_KEY"}</span>
+                  </span>
+                  {!customGeminiApiKey && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const key = prompt("Enter your Gemini API key (AIzaSy...):");
+                        if (key && key.trim()) {
+                          syncCustomGeminiApiKey(key.trim());
+                        }
+                      }}
+                      className="text-amber-800 hover:underline font-semibold"
+                    >
+                      Set Custom Key
+                    </button>
+                  )}
+                </div>
+
+                {/* Action trigger button */}
+                <button
+                  type="button"
+                  onClick={handleTriggerAiTranscriptScan}
+                  disabled={isAiScanningTranscript || (!aiTranscriptFile && !aiTranscriptRawText.trim())}
+                  className="w-full py-3 bg-[#1A1A1A] hover:bg-[#2C2C2C] disabled:opacity-40 text-white text-xs uppercase tracking-[0.2em] font-bold rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <span className={`material-symbols-outlined text-[18px] ${isAiScanningTranscript ? "animate-spin" : "text-amber-300"}`}>
+                    {isAiScanningTranscript ? "progress_activity" : "auto_awesome"}
+                  </span>
+                  <span>
+                    {isAiScanningTranscript ? "Analyzing with Gemini 3.1 Flash-Lite..." : "Extract Courses with Gemini 3.1 Flash-Lite"}
+                  </span>
+                </button>
+              </div>
+
+              {/* Step 2: Staged Review & Verification */}
+              {parsedAiCourses.length > 0 && (
+                <div className="p-4 bg-white/70 border border-[#1A1A1A]/10 rounded-xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                      <span className="bg-[#1A1A1A] text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]">2</span>
+                      <span>Review Extracted Courses ({parsedAiCourses.length})</span>
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allSelected = Object.keys(selectedAiCourses).length === parsedAiCourses.length &&
+                            Object.values(selectedAiCourses).every(Boolean);
+                          const newMap: Record<string, boolean> = {};
+                          parsedAiCourses.forEach(c => { newMap[c.id] = !allSelected; });
+                          setSelectedAiCourses(newMap);
+                        }}
+                        className="text-[10px] uppercase font-bold tracking-wider text-slate-600 hover:text-[#1A1A1A]"
+                      >
+                        {Object.values(selectedAiCourses).filter(Boolean).length === parsedAiCourses.length ? "Deselect All" : "Select All"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {aiExtractedData?.schoolName && (
+                    <div className="p-2.5 bg-amber-50/70 border border-amber-200/60 rounded-lg text-xs text-amber-900 flex items-center justify-between">
+                      <span className="font-semibold">Detected School: {aiExtractedData.schoolName}</span>
+                      {aiExtractedData.studentName && <span>Student: {aiExtractedData.studentName}</span>}
+                    </div>
+                  )}
+
+                  {/* Course Cards List */}
+                  <div className="max-h-[300px] overflow-y-auto border border-[#1A1A1A]/10 rounded-lg divide-y divide-[#1A1A1A]/5 bg-white">
+                    {parsedAiCourses.map((course) => {
+                      const isSelected = !!selectedAiCourses[course.id];
+                      return (
+                        <div key={course.id} className={`p-3 flex flex-col gap-2.5 ${isSelected ? 'bg-white' : 'bg-slate-50/50 opacity-60'}`}>
+                          <div className="flex items-center justify-between">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => setSelectedAiCourses({
+                                  ...selectedAiCourses,
+                                  [course.id]: e.target.checked
+                                })}
+                                className="w-4 h-4 rounded text-[#1A1A1A] focus:ring-[#1A1A1A]"
+                              />
+                              <span className="text-xs font-bold text-slate-800">
+                                {course.className}
+                              </span>
+                              {course.termTitle && (
+                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
+                                  {course.termTitle}
+                                </span>
+                              )}
+                            </label>
+                            <span className="text-[9px] font-mono text-slate-400 max-w-[200px] truncate" title={course.originalName}>
+                              Raw: {course.originalName}
+                            </span>
+                          </div>
+
+                          {isSelected && (
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
+                              <div className="sm:col-span-4">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Course Name</label>
+                                <input
+                                  type="text"
+                                  value={course.className}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, className: val } : c));
+                                  }}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="text-[8px] font-bold text-amber-800 uppercase block mb-0.5">UC A-G Area</label>
+                                <select
+                                  value={course.agCategory || "G"}
+                                  onChange={(e) => {
+                                    const val = e.target.value as AgCategory;
+                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, agCategory: val } : c));
+                                  }}
+                                  className="w-full p-1 border border-amber-300 rounded text-[11px] font-bold bg-amber-50/50"
+                                >
+                                  <option value="A">A: History</option>
+                                  <option value="B">B: English</option>
+                                  <option value="C">C: Math</option>
+                                  <option value="D">D: Science</option>
+                                  <option value="E">E: Language</option>
+                                  <option value="F">F: Arts</option>
+                                  <option value="G">G: Elective</option>
+                                  <option value="Non-AG">Non-A-G (PE)</option>
+                                </select>
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Level</label>
+                                <select
+                                  value={course.level}
+                                  onChange={(e) => {
+                                    const val = e.target.value as any;
+                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, level: val } : c));
+                                  }}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
+                                >
+                                  <option value="Regular">Regular</option>
+                                  <option value="Honors">Honors</option>
+                                  <option value="AP/IB">AP / IB</option>
+                                </select>
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Score %</label>
+                                <input
+                                  type="number"
+                                  value={course.score}
+                                  min="0"
+                                  max="100"
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, score: val } : c));
+                                  }}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-bold text-center bg-white"
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Credits</label>
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  value={course.credit}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, credit: val } : c));
+                                  }}
+                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold text-center bg-white"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Destination Options */}
+                  <div className="pt-2 border-t border-[#1A1A1A]/5 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Target Semester Destination</label>
+                        <select
+                          value={aiTargetTermId}
+                          onChange={(e) => {
+                            setAiTargetTermId(e.target.value);
+                            setAiTargetTermMode(e.target.value === "new" ? "auto" : "existing");
+                          }}
+                          className="w-full p-2 border border-[#1A1A1A]/12 rounded text-xs font-semibold bg-white"
+                        >
+                          <option value="new">Auto-create Semesters from Transcript</option>
+                          {terms.map(t => (
+                            <option key={t.id} value={t.id}>{t.title}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {aiTargetTermId !== "new" && (
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Integration Mode</label>
+                          <div className="flex gap-4 mt-2">
+                            <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
+                              <input
+                                type="radio"
+                                name="aiMode"
+                                value="append"
+                                checked={aiImportMode === "append"}
+                                onChange={() => setAiImportMode("append")}
+                                className="text-[#1A1A1A] focus:ring-[#1A1A1A] w-3.5 h-3.5"
+                              />
+                              <span>Append courses</span>
+                            </label>
+                            <label className="flex items-center gap-1.5 text-xs font-medium cursor-pointer">
+                              <input
+                                type="radio"
+                                name="aiMode"
+                                value="replace"
+                                checked={aiImportMode === "replace"}
+                                onChange={() => setAiImportMode("replace")}
+                                className="text-[#1A1A1A] focus:ring-[#1A1A1A] w-3.5 h-3.5"
+                              />
+                              <span>Replace existing</span>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleConfirmAiTranscriptImport}
+                      className="w-full py-3 bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white text-xs uppercase tracking-[0.2em] font-bold rounded-lg transition-all flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">done_all</span>
+                      <span>Import {Object.values(selectedAiCourses).filter(Boolean).length} Courses into GPA Tracker</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ManageBac Import Modal */}
       {isManageBacModalOpen && (
