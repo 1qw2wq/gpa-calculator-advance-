@@ -16,11 +16,12 @@ function getGeminiClient(customApiKey?: string): GoogleGenAI {
   });
 }
 
-// Model fallback cascade: primary gemini-3.1-flash-lite, fallback to 2.5-flash-lite or 3.5-flash if needed
+// Model fallback cascade: primary gemini-3.5-flash-lite as requested by user
 const CANDIDATE_MODELS = [
+  "gemini-3.5-flash-lite",
+  "gemini-3.5-flash",
   "gemini-3.1-flash-lite",
   "gemini-2.5-flash-lite",
-  "gemini-3.5-flash",
   "gemini-2.5-flash"
 ];
 
@@ -50,19 +51,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const systemInstruction = `You are an elite, highly accurate academic transcript parser and UC (University of California) admissions specialist.
-Your task is to thoroughly analyze the provided transcript document or text, extract all course records, and classify their academic attributes and University of California A-G subject designations.
+    const systemInstruction = `You are an elite academic transcript parser and University of California (UC) articulation specialist.
+Analyze the provided transcript document, image, or text with extreme precision.
 
-For each course found:
-1. "courseName": Clean, standard academic course name (e.g., "AP Calculus BC", "AP Physics 1", "Honors English 10", "Spanish 2", "PE").
+CRITICAL REQUIREMENT - DETECT ALL SEMESTERS / TERMS ACROSS MULTIPLE YEARS:
+1. High school transcripts ALWAYS span multiple semesters/terms across academic years (e.g. Grade 9 Fall, Grade 9 Spring, Grade 10 Fall, Grade 10 Spring, Grade 11 Fall, Grade 11 Spring, Grade 12 Fall, Grade 12 Spring; or Semester 1, Semester 2; or S1/S2; or Fall 2022, Spring 2023, etc.).
+2. You MUST identify and extract EVERY distinct semester, term, quarter, or academic grading period.
+3. DO NOT lump courses from multiple semesters into a single term! Each semester must be its own distinct entry in the "terms" array in chronological order.
+4. IMPORTANT - HANDLING COLUMNAR / MULTI-TERM TRANSCRIPTS:
+   - Many transcripts list courses with columns for multiple terms on one row (e.g., Course Name | Sem 1 / S1 Grade | Sem 2 / S2 Grade).
+   - If a course has separate S1 and S2 grades, you MUST split them into two entries: place the Semester 1 grade under the Semester 1 term (credit: typically 0.5), and the Semester 2 grade under the Semester 2 term (credit: typically 0.5).
+   - NEVER drop Semester 2 or merge them into one semester!
+5. For each semester in "terms":
+   - "termTitle": Distinct descriptive name, e.g. "Grade 9 - Fall 2022" or "Grade 9 Semester 1" or "Grade 10 Semester 1" or "Fall 2023"
+   - "gradeLevel": "9" | "10" | "11" | "12" | "Other" (determine based on school year or sequence: year 1 = 9, year 2 = 10, year 3 = 11, year 4 = 12)
+   - "courses": Array of all courses taken specifically during that semester.
+
+For each course:
+1. "courseName": Clean, official academic course name (e.g., "AP Calculus BC", "AP Physics 1", "Honors English 10", "Spanish 2", "PE").
 2. "originalName": The raw, unaltered course title exactly as shown on the transcript.
 3. "score": Numeric percentage (0-100) as a string. If the transcript only displays letter grades, convert accurately:
    - A+ -> "98", A -> "95", A- -> "91"
    - B+ -> "88", B -> "85", B- -> "81"
    - C+ -> "78", C -> "75", C- -> "71"
    - D -> "65", F -> "50"
+   - If 1-7 IB scale: 7 -> "98", 6 -> "93", 5 -> "85", 4 -> "75", 3 -> "65", 2 -> "50"
 4. "letterGrade": The explicit or mapped letter grade ("A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F").
-5. "credit": Credit hours, typically "1.0" for year-long / standard unit or "0.5" for semester unit. Default to "1.0" if unspecified.
+5. "credit": Credit hours (e.g. "1.0" or "0.5"). Default to "1.0" if unspecified.
 6. "category": Best match among: ["Core Subjects", "Languages", "Arts", "Business & Technology", "Physical Education", "Other Electives", "Chinese Specific"].
 7. "level": One of ["Regular", "Honors", "AP/IB", "Custom"]. Mark as "AP/IB" if it is an AP or IB course. Mark as "Honors" if marked as Honors or H.
 8. "weightBoost": "1.0" for AP/IB, "0.5" for Honors, "0.0" for Regular.
@@ -75,8 +90,6 @@ For each course found:
    - "F": Visual and Performing Arts (Studio Art, Music, Band, Orchestra, Choir, Theatre, Drama, Dance)
    - "G": College-Preparatory Elective (Economics, Psychology, Computer Science, Engineering, Journalism)
    - "Non-AG": Physical Education (PE), Health, Driver's Ed, Teacher Assistant, Study Hall, Advisory, Free Period
-10. "termTitle": The specific term or semester if indicated (e.g. "Semester 1", "Fall 2024", "Grade 10 Semester 2").
-11. "gradeLevel": Detected grade level: "9" | "10" | "11" | "12" | "Other".
 
 You MUST output ONLY valid JSON matching this schema:
 {
@@ -100,8 +113,7 @@ You MUST output ONLY valid JSON matching this schema:
         }
       ]
     }
-  ],
-  "extractedCourses": [ ...flat list of all extracted courses... ]
+  ]
 }`;
 
     // Prepare contents
@@ -162,29 +174,63 @@ You MUST output ONLY valid JSON matching this schema:
 
     const parsedJson = JSON.parse(cleaned);
 
-    // Ensure extractedCourses list is always populated
-    if (!parsedJson.extractedCourses || parsedJson.extractedCourses.length === 0) {
-      const flatList: any[] = [];
-      if (Array.isArray(parsedJson.terms)) {
-        parsedJson.terms.forEach((t: any) => {
-          if (Array.isArray(t.courses)) {
-            t.courses.forEach((c: any) => {
-              flatList.push({
-                ...c,
-                termTitle: t.termTitle,
-                gradeLevel: t.gradeLevel
-              });
-            });
+    let rootObj: any = parsedJson;
+    if (Array.isArray(parsedJson)) {
+      if (parsedJson.length > 0 && (parsedJson[0].courses || parsedJson[0].termTitle)) {
+        rootObj = { terms: parsedJson };
+      } else {
+        rootObj = { extractedCourses: parsedJson };
+      }
+    }
+
+    // Normalize terms structure
+    let terms = rootObj.terms || rootObj.semesters || [];
+
+    // Fallback: If terms is missing or empty, group extractedCourses by termTitle or gradeLevel
+    if (!Array.isArray(terms) || terms.length === 0) {
+      const rawList = rootObj.extractedCourses || rootObj.courses || [];
+      if (Array.isArray(rawList) && rawList.length > 0) {
+        const termMap: Record<string, any> = {};
+        rawList.forEach((c: any) => {
+          const tTitle = c.termTitle || c.semester || c.term || "Semester 1";
+          if (!termMap[tTitle]) {
+            termMap[tTitle] = {
+              termTitle: tTitle,
+              gradeLevel: c.gradeLevel || "10",
+              courses: []
+            };
           }
+          termMap[tTitle].courses.push(c);
+        });
+        terms = Object.values(termMap);
+      }
+    }
+
+    // Ensure every course inside every term carries its termTitle and gradeLevel
+    const flatList: any[] = [];
+    terms.forEach((t: any, termIdx: number) => {
+      if (!t.termTitle) {
+        t.termTitle = `Semester ${termIdx + 1}`;
+      }
+      if (!t.gradeLevel) {
+        t.gradeLevel = termIdx < 2 ? "9" : termIdx < 4 ? "10" : termIdx < 6 ? "11" : "12";
+      }
+      if (Array.isArray(t.courses)) {
+        t.courses.forEach((c: any) => {
+          c.termTitle = t.termTitle;
+          c.gradeLevel = t.gradeLevel;
+          flatList.push(c);
         });
       }
-      parsedJson.extractedCourses = flatList;
-    }
+    });
+
+    rootObj.terms = terms;
+    rootObj.extractedCourses = flatList;
 
     return NextResponse.json({
       success: true,
       modelUsed: usedModel,
-      data: parsedJson
+      data: rootObj
     });
 
   } catch (error: any) {

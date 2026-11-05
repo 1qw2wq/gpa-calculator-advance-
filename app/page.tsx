@@ -379,7 +379,7 @@ export default function Home() {
   const [isDetectingUcTypes, setIsDetectingUcTypes] = useState<boolean>(false);
   const [customGeminiApiKey, setCustomGeminiApiKey] = useState<string>("");
 
-  // AI Transcript Scanner (Gemini 3.1 Flash-Lite) state variables
+  // AI Transcript Scanner (Gemini 3.5 Flash-Lite) state variables
   const [isAiTranscriptModalOpen, setIsAiTranscriptModalOpen] = useState<boolean>(false);
   const [aiTranscriptInputMode, setAiTranscriptInputMode] = useState<"upload" | "paste">("upload");
   const [aiTranscriptFile, setAiTranscriptFile] = useState<{ name: string; mimeType: string; base64: string } | null>(null);
@@ -796,6 +796,7 @@ export default function Home() {
   const getTotals = () => {
     let totalWeightedGradePoints = 0;
     let totalUnweightedGradePoints = 0;
+    let totalCollegiate4GradePoints = 0;
     let totalCredits = 0;
 
     terms.forEach((term) => {
@@ -808,6 +809,14 @@ export default function Home() {
             score = Math.round(score);
           }
           const gradePoint = convertScoreToGradePoint(score, useLinearGpa);
+
+          // Collegiate standard 4.0 grade point: A=4, B=3, C=2, D=1, F=0
+          let col4Gp = 0;
+          if (score >= 90) col4Gp = 4.0;
+          else if (score >= 80) col4Gp = 3.0;
+          else if (score >= 70) col4Gp = 2.0;
+          else if (score >= 60) col4Gp = 1.0;
+          else col4Gp = 0.0;
           
           let boost = 0;
           if (course.level === "Honors") {
@@ -820,6 +829,7 @@ export default function Home() {
 
           totalWeightedGradePoints += (gradePoint + boost) * credit;
           totalUnweightedGradePoints += gradePoint * credit;
+          totalCollegiate4GradePoints += col4Gp * credit;
           totalCredits += credit;
         }
       });
@@ -827,9 +837,11 @@ export default function Home() {
 
     const gpa = totalCredits === 0 ? 0 : totalWeightedGradePoints / totalCredits;
     const unweightedGpa = totalCredits === 0 ? 0 : totalUnweightedGradePoints / totalCredits;
+    const collegiateUnweightedGpa = totalCredits === 0 ? 0 : totalCollegiate4GradePoints / totalCredits;
     return {
       gpa: gpa.toFixed(2),
       unweightedGpa: unweightedGpa.toFixed(2),
+      collegiateUnweightedGpa: collegiateUnweightedGpa.toFixed(2),
       totalCredits,
       qualityPoints: totalWeightedGradePoints.toFixed(1),
       unweightedQualityPoints: totalUnweightedGradePoints.toFixed(1)
@@ -1121,9 +1133,14 @@ export default function Home() {
         });
       });
 
-      csvRows.push(`,,,Standard Weighted GPA,,${totals.gpa}`);
-      csvRows.push(`,,,UC Capped GPA,,${ucTotals.cappedWeightedGpa}`);
-      csvRows.push(`,,,UC Fully Weighted GPA,,${ucTotals.fullyWeightedGpa}`);
+      csvRows.push(`,,,Standard High School Weighted GPA,,${totals.gpa}`);
+      csvRows.push(`,,,Standard High School Unweighted GPA (4.0 Max),,${totals.collegiateUnweightedGpa}`);
+      csvRows.push(`,,,Standard High School Unweighted GPA (4.33 Scale),,${totals.unweightedGpa}`);
+      csvRows.push(`,,,UC Capped Weighted GPA (10th-11th),,${ucTotals.cappedWeightedGpa}`);
+      csvRows.push(`,,,UC Fully Weighted GPA (10th-11th),,${ucTotals.fullyWeightedGpa}`);
+      csvRows.push(`,,,UC Unweighted GPA (10th-11th),,${ucTotals.unweightedGpa}`);
+      csvRows.push(`,,,Cumulative UC Weighted GPA (9-12),,${ucTotals.cumulativeWeightedGpa}`);
+      csvRows.push(`,,,Cumulative UC Unweighted GPA (9-12),,${ucTotals.cumulativeUnweightedGpa}`);
       fileContent = "data:text/csv;charset=utf-8," + encodeURIComponent(csvRows.join("\r\n"));
       fileName += ".csv";
     } else {
@@ -1147,7 +1164,7 @@ export default function Home() {
         });
       });
 
-      fileContent += `\nSTANDARD CUMULATIVE GPA: ${totals.gpa}\nUC CAPPED WEIGHTED GPA: ${ucTotals.cappedWeightedGpa}\nUC FULLY WEIGHTED GPA: ${ucTotals.fullyWeightedGpa}\nUC UNWEIGHTED GPA: ${ucTotals.unweightedGpa}\nTOTAL CREDITS COMPLETED: ${totals.totalCredits}\n`;
+      fileContent += `\n=== SUMMARY OF ALL WEIGHTED & UNWEIGHTED GPAS ===\nStandard High School Weighted GPA: ${totals.gpa}\nStandard High School Unweighted (4.0 Max): ${totals.collegiateUnweightedGpa}\nStandard High School Unweighted (4.33 Scale): ${totals.unweightedGpa}\nUC Capped Weighted GPA (10th-11th): ${ucTotals.cappedWeightedGpa}\nUC Fully Weighted GPA (10th-11th): ${ucTotals.fullyWeightedGpa}\nUC Unweighted GPA (10th-11th): ${ucTotals.unweightedGpa}\nCumulative UC Weighted GPA (9-12): ${ucTotals.cumulativeWeightedGpa}\nCumulative UC Unweighted GPA (9-12): ${ucTotals.cumulativeUnweightedGpa}\nTOTAL CREDITS COMPLETED: ${totals.totalCredits}\n`;
       fileContent = "data:text/plain;charset=utf-8," + encodeURIComponent(fileContent);
       fileName += ".txt";
     }
@@ -1354,7 +1371,7 @@ export default function Home() {
     }
   };
 
-  // UC A-G Types Auto-Detection using Gemini 3.1 Flash-Lite
+  // UC A-G Types Auto-Detection using Gemini 3.5 Flash-Lite
   const handleAutoDetectUcTypes = async () => {
     const allCoursesList: Array<{ id: string; courseName: string; currentLevel?: string; currentAg?: string }> = [];
     terms.forEach(t => {
@@ -1427,7 +1444,7 @@ export default function Home() {
       }));
 
       syncTerms(updatedTerms);
-      showAlert(`AI Classification Complete! Successfully evaluated ${updatedCount} courses with Gemini 3.1 Flash-Lite.`);
+      showAlert(`AI Classification Complete! Successfully evaluated ${updatedCount} courses with Gemini 3.5 Flash-Lite.`);
     } catch (err: any) {
       console.error("UC Auto-Detect Error:", err);
       showAlert(`Classification error: ${err?.message || "Could not connect to AI service. Please check your API key."}`);
@@ -1436,7 +1453,7 @@ export default function Home() {
     }
   };
 
-  // AI Transcript Scanner Handler using Gemini 3.1 Flash-Lite
+  // AI Transcript Scanner Handler using Gemini 3.5 Flash-Lite
   const handleTriggerAiTranscriptScan = async () => {
     if (!aiTranscriptRawText.trim() && !aiTranscriptFile) {
       showAlert("Please upload a transcript document/image or paste transcript text first.");
@@ -1509,38 +1526,70 @@ export default function Home() {
       return;
     }
 
-    if (aiTargetTermMode === "auto" && aiExtractedData?.terms && aiExtractedData.terms.length > 0) {
-      // Group courses by their detected terms
-      const newTermsToAdd: Term[] = [];
-      aiExtractedData.terms.forEach((termData: any, idx: number) => {
-        const termCourses = selected.filter(c => c.termTitle === termData.termTitle);
-        if (termCourses.length > 0) {
-          const coursesToInsert: Course[] = termCourses.map(c => ({
-            id: generateUniqueId("course"),
-            category: c.category,
-            courseName: c.className,
-            score: c.score,
-            credit: c.credit,
-            level: c.level,
-            weightBoost: c.level === "AP/IB" ? "1.0" : c.level === "Honors" ? "0.5" : "0.0",
-            agCategory: c.agCategory
-          }));
+    if (aiTargetTermMode === "auto") {
+      // Map courses by their termTitle
+      const termMap = new Map<string, { title: string; gradeLevel: "9" | "10" | "11" | "12" | "Other"; courses: Course[] }>();
 
+      // 1. Pre-populate from aiExtractedData.terms to maintain chronological order
+      if (aiExtractedData?.terms && Array.isArray(aiExtractedData.terms)) {
+        aiExtractedData.terms.forEach((t: any, idx: number) => {
+          const title = (t.termTitle || `Semester ${idx + 1}`).trim();
+          termMap.set(title.toLowerCase(), {
+            title,
+            gradeLevel: t.gradeLevel || inferGradeLevelFromTermTitle(title, idx),
+            courses: []
+          });
+        });
+      }
+
+      // 2. Distribute selected courses into terms
+      selected.forEach((c) => {
+        const courseTermTitle = (c.termTitle || "Semester 1").trim();
+        const key = courseTermTitle.toLowerCase();
+
+        let targetGroup = termMap.get(key);
+        if (!targetGroup) {
+          targetGroup = {
+            title: courseTermTitle,
+            gradeLevel: c.gradeLevel || inferGradeLevelFromTermTitle(courseTermTitle, termMap.size),
+            courses: []
+          };
+          termMap.set(key, targetGroup);
+        }
+
+        targetGroup.courses.push({
+          id: generateUniqueId("course"),
+          category: c.category,
+          courseName: c.className,
+          score: c.score,
+          credit: c.credit,
+          level: c.level,
+          weightBoost: c.level === "AP/IB" ? "1.0" : c.level === "Honors" ? "0.5" : "0.0",
+          agCategory: c.agCategory
+        });
+      });
+
+      // 3. Collect terms with at least one course
+      const newTermsToAdd: Term[] = [];
+      termMap.forEach((group) => {
+        if (group.courses.length > 0) {
           newTermsToAdd.push({
             id: generateUniqueId("term"),
-            title: termData.termTitle || `Semester ${terms.length + idx + 1}`,
-            gradeLevel: termData.gradeLevel || inferGradeLevelFromTermTitle(termData.termTitle || "", terms.length + idx),
-            courses: coursesToInsert,
-            reflection: "Imported via Gemini 3.1 Flash-Lite Transcript Scanner.",
-            bullets: [`Imported ${coursesToInsert.length} courses from official transcript.`]
+            title: group.title,
+            gradeLevel: group.gradeLevel,
+            courses: group.courses,
+            reflection: "Imported via Gemini 3.5 Flash-Lite Transcript Scanner.",
+            bullets: [`Imported ${group.courses.length} courses from official transcript.`]
           });
         }
       });
 
       if (newTermsToAdd.length > 0) {
-        const updated = [...terms, ...newTermsToAdd];
+        // If current terms array only has 1 empty semester, replace it cleanly!
+        const isCurrentEmpty = terms.length === 1 && terms[0].courses.length === 0;
+        const updated = isCurrentEmpty ? newTermsToAdd : [...terms, ...newTermsToAdd];
         syncTerms(updated);
-        showAlert(`Successfully auto-created ${newTermsToAdd.length} semesters and imported ${selected.length} courses!`);
+        showAlert(`Successfully imported ${selected.length} courses across ${newTermsToAdd.length} semesters!`);
         setIsAiTranscriptModalOpen(false);
         setParsedAiCourses([]);
         setAiTranscriptFile(null);
@@ -1568,7 +1617,7 @@ export default function Home() {
         title: `Semester ${nextTermNum} (AI Transcript Import)`,
         gradeLevel: inferGradeLevelFromTermTitle(`Semester ${nextTermNum}`, terms.length),
         courses: coursesToInsert,
-        reflection: "Imported via Gemini 3.1 Flash-Lite Transcript Scanner.",
+        reflection: "Imported via Gemini 3.5 Flash-Lite Transcript Scanner.",
         bullets: [`Imported ${coursesToInsert.length} courses.`]
       };
       syncTerms([...terms, newTerm]);
@@ -1665,7 +1714,7 @@ export default function Home() {
                 onClick={() => setIsAiTranscriptModalOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-2 text-xs uppercase tracking-wider font-bold text-slate-800 bg-amber-50/80 hover:bg-amber-100/90 rounded-xl transition-all border border-amber-300/60 shadow-sm"
                 id="aiTranscriptBtn"
-                title="AI Transcript Scanner (Gemini 3.1 Flash-Lite)"
+                title="AI Transcript Scanner (Gemini 3.5 Flash-Lite)"
               >
                 <span className="material-symbols-outlined text-[18px] text-amber-600">auto_awesome</span>
                 <span>AI Transcript</span>
@@ -2090,9 +2139,11 @@ export default function Home() {
                       <h1 className="text-7xl lg:text-8xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
                         {totals.gpa}
                       </h1>
-                      <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">Weighted GPA</p>
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        Unweighted GPA &bull; <span style={{ color: currentAccent.color }}>{totals.unweightedGpa}</span>
+                      <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">Standard Weighted GPA</p>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-center gap-2 mt-1">
+                        <span>Unweighted 4.0: <strong className="text-slate-800">{totals.collegiateUnweightedGpa}</strong></span>
+                        <span>&bull;</span>
+                        <span>Unweighted 4.33: <strong className="text-slate-800">{totals.unweightedGpa}</strong></span>
                       </div>
 
                       {/* Stats Grid */}
@@ -2121,6 +2172,102 @@ export default function Home() {
                   </button>
                 </div>
 
+                {/* All Weighted & Unweighted GPAs Ledger Card */}
+                <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10">
+                  <div className="flex items-center justify-between mb-3 border-b border-[#1A1A1A]/10 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="bg-[#1A1A1A]/5 p-1.5 rounded text-[#1A1A1A] flex items-center justify-center" style={{ color: currentAccent.color }}>
+                        <span className="material-symbols-outlined text-[18px]">format_list_numbered</span>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]" style={{ color: currentAccent.color }}>
+                          All Weighted &amp; Unweighted GPAs
+                        </h3>
+                        <span className="text-[9px] text-slate-500">Multi-System Comparison Ledger</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    {/* Section 1: Standard High School */}
+                    <div>
+                      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                        <span>High School Standard</span>
+                        <span className="text-[8px] font-normal lowercase text-slate-400">(honors/AP weighted &amp; unweighted)</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2.5 bg-white border border-[#1A1A1A]/10 rounded flex flex-col">
+                          <span className="text-[8.5px] font-bold uppercase tracking-wider text-slate-500">HS Weighted</span>
+                          <span className="text-2xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                            {totals.gpa}
+                          </span>
+                          <span className="text-[8px] text-slate-400">AP/IB (+1.0) &amp; Honors (+0.5)</span>
+                        </div>
+                        <div className="p-2.5 bg-white border border-[#1A1A1A]/10 rounded flex flex-col">
+                          <span className="text-[8.5px] font-bold uppercase tracking-wider text-slate-500">HS Unweighted 4.0</span>
+                          <span className="text-2xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                            {totals.collegiateUnweightedGpa}
+                          </span>
+                          <span className="text-[8px] text-slate-400">Collegiate standard (max 4.00)</span>
+                        </div>
+                      </div>
+                      <div className="mt-1.5 px-2 py-1.5 bg-slate-50/80 border border-slate-200/60 rounded flex items-center justify-between text-xs">
+                        <span className="text-[9px] font-medium text-slate-600">HS Unweighted (4.33 Scale):</span>
+                        <span className="font-mono font-bold text-slate-800">{totals.unweightedGpa}</span>
+                      </div>
+                    </div>
+
+                    {/* Section 2: University of California Admissions Standard (10th-11th) */}
+                    <div className="pt-2 border-t border-[#1A1A1A]/10">
+                      <div className="text-[9px] font-bold text-amber-900 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                        <span className="material-symbols-outlined text-[13px] text-amber-700">school</span>
+                        <span>UC Admissions Benchmark (10th &amp; 11th Grade A-G)</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <div className="p-2 bg-amber-50/70 border border-amber-300/70 rounded flex flex-col items-center text-center">
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-amber-900">UC Capped</span>
+                          <span className="text-xl font-light italic mt-0.5 text-amber-950 font-bold" style={{ fontFamily: "Georgia, serif" }}>
+                            {ucTotals.cappedWeightedGpa}
+                          </span>
+                          <span className="text-[7.5px] text-amber-800">8 sem cap</span>
+                        </div>
+                        <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex flex-col items-center text-center">
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-slate-600">UC Fully Wtd</span>
+                          <span className="text-xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                            {ucTotals.fullyWeightedGpa}
+                          </span>
+                          <span className="text-[7.5px] text-slate-400">Uncapped honors</span>
+                        </div>
+                        <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex flex-col items-center text-center">
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-slate-600">UC Unweighted</span>
+                          <span className="text-xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                            {ucTotals.unweightedGpa}
+                          </span>
+                          <span className="text-[7.5px] text-slate-400">Flat 4.0 scale</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Section 3: Cumulative UC System (9th-12th Grade) */}
+                    <div className="pt-2 border-t border-[#1A1A1A]/10">
+                      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                        <span>Cumulative UC Scale (Grades 9–12)</span>
+                        <span className="text-[8px] font-normal lowercase text-slate-400">(all high school A-G)</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex items-center justify-between text-xs">
+                          <span className="text-[9px] font-medium text-slate-600">Cumulative Weighted:</span>
+                          <span className="font-mono font-bold text-slate-800 text-sm">{ucTotals.cumulativeWeightedGpa}</span>
+                        </div>
+                        <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex items-center justify-between text-xs">
+                          <span className="text-[9px] font-medium text-slate-600">Cumulative Unweighted:</span>
+                          <span className="font-mono font-bold text-slate-800 text-sm">{ucTotals.cumulativeUnweightedGpa}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* UC A-G Requirement Tracker OR Grading Scale Table */}
                 {useUcGpa ? (
                   <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10">
@@ -2138,7 +2285,7 @@ export default function Home() {
                         onClick={handleAutoDetectUcTypes}
                         disabled={isDetectingUcTypes}
                         className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white flex items-center gap-1 transition-all disabled:opacity-50"
-                        title="Auto-classify courses with Gemini 3.1 Flash-Lite"
+                        title="Auto-classify courses with Gemini 3.5 Flash-Lite"
                       >
                         <span className={`material-symbols-outlined text-[14px] ${isDetectingUcTypes ? "animate-spin" : "text-amber-300"}`}>
                           {isDetectingUcTypes ? "progress_activity" : "auto_awesome"}
@@ -2398,7 +2545,7 @@ export default function Home() {
                         </button>
                       )}
                     </div>
-                    <span className="text-[9px] text-slate-400 mt-1 block">Used for Gemini 3.1 Flash-Lite transcript parsing and UC type auto-detection.</span>
+                    <span className="text-[9px] text-slate-400 mt-1 block">Used for Gemini 3.5 Flash-Lite transcript parsing and UC type auto-detection.</span>
                   </div>
 
                   {/* 2. Custom Category Addition */}
@@ -2856,7 +3003,7 @@ export default function Home() {
          MODALS (AI Transcript, ManageBac, Export, Full Scale, etc.)
          ======================================================== */}
 
-      {/* AI Transcript Scanner Modal (Gemini 3.1 Flash-Lite) */}
+      {/* AI Transcript Scanner Modal (Gemini 3.5 Flash-Lite) */}
       {isAiTranscriptModalOpen && (
         <div className="modal block">
           <div className="modal-content rounded-xl p-6 relative border border-[#1A1A1A]/15 shadow-xl max-w-3xl max-h-[92vh] overflow-y-auto">
@@ -2871,7 +3018,7 @@ export default function Home() {
                     AI Transcript Scanner
                   </h2>
                   <span className="text-[10px] text-amber-800 font-mono font-medium">
-                    Powered by Gemini 3.1 Flash-Lite
+                    Powered by Gemini 3.5 Flash-Lite
                   </span>
                 </div>
               </div>
@@ -3034,7 +3181,7 @@ export default function Home() {
                     {isAiScanningTranscript ? "progress_activity" : "auto_awesome"}
                   </span>
                   <span>
-                    {isAiScanningTranscript ? "Analyzing with Gemini 3.1 Flash-Lite..." : "Extract Courses with Gemini 3.1 Flash-Lite"}
+                    {isAiScanningTranscript ? "Analyzing with Gemini 3.5 Flash-Lite..." : "Extract Courses with Gemini 3.5 Flash-Lite"}
                   </span>
                 </button>
               </div>
@@ -3071,119 +3218,179 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Course Cards List */}
-                  <div className="max-h-[300px] overflow-y-auto border border-[#1A1A1A]/10 rounded-lg divide-y divide-[#1A1A1A]/5 bg-white">
-                    {parsedAiCourses.map((course) => {
-                      const isSelected = !!selectedAiCourses[course.id];
-                      return (
-                        <div key={course.id} className={`p-3 flex flex-col gap-2.5 ${isSelected ? 'bg-white' : 'bg-slate-50/50 opacity-60'}`}>
-                          <div className="flex items-center justify-between">
-                            <label className="flex items-center gap-2 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={(e) => setSelectedAiCourses({
-                                  ...selectedAiCourses,
-                                  [course.id]: e.target.checked
-                                })}
-                                className="w-4 h-4 rounded text-[#1A1A1A] focus:ring-[#1A1A1A]"
-                              />
-                              <span className="text-xs font-bold text-slate-800">
-                                {course.className}
-                              </span>
-                              {course.termTitle && (
-                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
-                                  {course.termTitle}
-                                </span>
-                              )}
-                            </label>
-                            <span className="text-[9px] font-mono text-slate-400 max-w-[200px] truncate" title={course.originalName}>
-                              Raw: {course.originalName}
-                            </span>
-                          </div>
+                  {/* Semester-Grouped Course Cards List */}
+                  {(() => {
+                    const termMap: Record<string, { termTitle: string; gradeLevel?: string; courses: typeof parsedAiCourses }> = {};
+                    const order: string[] = [];
 
-                          {isSelected && (
-                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
-                              <div className="sm:col-span-4">
-                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Course Name</label>
-                                <input
-                                  type="text"
-                                  value={course.className}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, className: val } : c));
+                    if (aiExtractedData?.terms && Array.isArray(aiExtractedData.terms)) {
+                      aiExtractedData.terms.forEach((t: any) => {
+                        const title = (t.termTitle || "Semester 1").trim();
+                        if (!termMap[title]) {
+                          termMap[title] = { termTitle: title, gradeLevel: t.gradeLevel, courses: [] };
+                          order.push(title);
+                        }
+                      });
+                    }
+
+                    parsedAiCourses.forEach((course) => {
+                      const title = (course.termTitle || "Semester 1").trim();
+                      if (!termMap[title]) {
+                        termMap[title] = { termTitle: title, gradeLevel: course.gradeLevel, courses: [] };
+                        order.push(title);
+                      }
+                      termMap[title].courses.push(course);
+                    });
+
+                    const validGroups = order.map(k => termMap[k]).filter(g => g && g.courses.length > 0);
+
+                    return (
+                      <div className="max-h-[360px] overflow-y-auto border border-[#1A1A1A]/10 rounded-lg divide-y divide-[#1A1A1A]/10 bg-white">
+                        {validGroups.map((group, groupIdx) => {
+                          const groupSelectedCount = group.courses.filter(c => selectedAiCourses[c.id]).length;
+                          const isAllGroupSelected = groupSelectedCount === group.courses.length && group.courses.length > 0;
+
+                          return (
+                            <div key={`term-group-${groupIdx}`} className="p-3 bg-slate-50/40">
+                              <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#1A1A1A]/10">
+                                <div className="flex items-center gap-2">
+                                  <span className="material-symbols-outlined text-amber-600 text-[18px]">calendar_month</span>
+                                  <span className="font-bold text-xs text-[#1A1A1A]">{group.termTitle}</span>
+                                  {group.gradeLevel && (
+                                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold">
+                                      Grade {group.gradeLevel}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-slate-500 font-medium">({group.courses.length} courses)</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newMap = { ...selectedAiCourses };
+                                    group.courses.forEach(c => {
+                                      newMap[c.id] = !isAllGroupSelected;
+                                    });
+                                    setSelectedAiCourses(newMap);
                                   }}
-                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
-                                />
-                              </div>
-                              <div className="sm:col-span-2">
-                                <label className="text-[8px] font-bold text-amber-800 uppercase block mb-0.5">UC A-G Area</label>
-                                <select
-                                  value={course.agCategory || "G"}
-                                  onChange={(e) => {
-                                    const val = e.target.value as AgCategory;
-                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, agCategory: val } : c));
-                                  }}
-                                  className="w-full p-1 border border-amber-300 rounded text-[11px] font-bold bg-amber-50/50"
+                                  className="text-[9px] uppercase font-bold tracking-wider text-slate-600 hover:text-[#1A1A1A]"
                                 >
-                                  <option value="A">A: History</option>
-                                  <option value="B">B: English</option>
-                                  <option value="C">C: Math</option>
-                                  <option value="D">D: Science</option>
-                                  <option value="E">E: Language</option>
-                                  <option value="F">F: Arts</option>
-                                  <option value="G">G: Elective</option>
-                                  <option value="Non-AG">Non-A-G (PE)</option>
-                                </select>
+                                  {isAllGroupSelected ? "Deselect Semester" : "Select Semester"}
+                                </button>
                               </div>
-                              <div className="sm:col-span-2">
-                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Level</label>
-                                <select
-                                  value={course.level}
-                                  onChange={(e) => {
-                                    const val = e.target.value as any;
-                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, level: val } : c));
-                                  }}
-                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
-                                >
-                                  <option value="Regular">Regular</option>
-                                  <option value="Honors">Honors</option>
-                                  <option value="AP/IB">AP / IB</option>
-                                </select>
-                              </div>
-                              <div className="sm:col-span-2">
-                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Score %</label>
-                                <input
-                                  type="number"
-                                  value={course.score}
-                                  min="0"
-                                  max="100"
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, score: val } : c));
-                                  }}
-                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-bold text-center bg-white"
-                                />
-                              </div>
-                              <div className="sm:col-span-2">
-                                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Credits</label>
-                                <input
-                                  type="number"
-                                  step="0.5"
-                                  value={course.credit}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, credit: val } : c));
-                                  }}
-                                  className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold text-center bg-white"
-                                />
+
+                              <div className="space-y-2">
+                                {group.courses.map((course) => {
+                                  const isSelected = !!selectedAiCourses[course.id];
+                                  return (
+                                    <div key={course.id} className={`p-2.5 rounded-lg border transition-all ${isSelected ? 'bg-white border-[#1A1A1A]/15 shadow-2xs' : 'bg-slate-100/50 border-transparent opacity-60'}`}>
+                                      <div className="flex items-center justify-between">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                          <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={(e) => setSelectedAiCourses({
+                                              ...selectedAiCourses,
+                                              [course.id]: e.target.checked
+                                            })}
+                                            className="w-4 h-4 rounded text-[#1A1A1A] focus:ring-[#1A1A1A]"
+                                          />
+                                          <span className="text-xs font-bold text-slate-800">
+                                            {course.className}
+                                          </span>
+                                        </label>
+                                        <span className="text-[9px] font-mono text-slate-400 max-w-[200px] truncate" title={course.originalName}>
+                                          Raw: {course.originalName}
+                                        </span>
+                                      </div>
+
+                                      {isSelected && (
+                                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs mt-2">
+                                          <div className="sm:col-span-4">
+                                            <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Course Name</label>
+                                            <input
+                                              type="text"
+                                              value={course.className}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, className: val } : c));
+                                              }}
+                                              className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
+                                            />
+                                          </div>
+                                          <div className="sm:col-span-2">
+                                            <label className="text-[8px] font-bold text-amber-800 uppercase block mb-0.5">UC A-G Area</label>
+                                            <select
+                                              value={course.agCategory || "G"}
+                                              onChange={(e) => {
+                                                const val = e.target.value as AgCategory;
+                                                setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, agCategory: val } : c));
+                                              }}
+                                              className="w-full p-1 border border-amber-300 rounded text-[11px] font-bold bg-amber-50/50"
+                                            >
+                                              <option value="A">A: History</option>
+                                              <option value="B">B: English</option>
+                                              <option value="C">C: Math</option>
+                                              <option value="D">D: Science</option>
+                                              <option value="E">E: Language</option>
+                                              <option value="F">F: Arts</option>
+                                              <option value="G">G: Elective</option>
+                                              <option value="Non-AG">Non-A-G (PE)</option>
+                                            </select>
+                                          </div>
+                                          <div className="sm:col-span-2">
+                                            <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Level</label>
+                                            <select
+                                              value={course.level}
+                                              onChange={(e) => {
+                                                const val = e.target.value as any;
+                                                setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, level: val } : c));
+                                              }}
+                                              className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold bg-white"
+                                            >
+                                              <option value="Regular">Regular</option>
+                                              <option value="Honors">Honors</option>
+                                              <option value="AP/IB">AP / IB</option>
+                                            </select>
+                                          </div>
+                                          <div className="sm:col-span-2">
+                                            <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Score %</label>
+                                            <input
+                                              type="number"
+                                              value={course.score}
+                                              min="0"
+                                              max="100"
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, score: val } : c));
+                                              }}
+                                              className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-bold text-center bg-white"
+                                            />
+                                          </div>
+                                          <div className="sm:col-span-2">
+                                            <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Credits</label>
+                                            <input
+                                              type="number"
+                                              step="0.5"
+                                              value={course.credit}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setParsedAiCourses(parsedAiCourses.map(c => c.id === course.id ? { ...c, credit: val } : c));
+                                              }}
+                                              className="w-full p-1 border border-[#1A1A1A]/10 rounded text-[11px] font-semibold text-center bg-white"
+                                            />
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
 
                   {/* Destination Options */}
                   <div className="pt-2 border-t border-[#1A1A1A]/5 space-y-3">
