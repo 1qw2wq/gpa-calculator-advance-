@@ -43,7 +43,7 @@ Calculates the three official University of California admissions metrics per Ca
 - **Cumulative UC High School Scale (Grades 9–12)**: Audits cumulative A-G progress across all high school years.
 - **A-G Subject Progress Tracker**: Visual progress bar tracking minimum requirements across Areas A through G.
 
-### 3. 📈 High School Standard GPA (Weighted & Unweighted)
+### 3. 📈 High School Standard GPA (Weighted and Unweighted)
 - **Large Unweighted GPA Hero**: Clean typography highlighting the official unweighted GPA (4.33 scale and 4.00 collegiate standard).
 - **Standard Weighted GPA**: Honors ($+0.5$), AP/IB ($+1.0$), or custom boost values.
 - **Quality Points Calculation**:
@@ -61,7 +61,7 @@ Calculates the three official University of California admissions metrics per Ca
   - Compares Semester 1 vs Semester 2 side by side with total courses, credits, score average, unweighted GPA, and weighted GPA.
   - Toggle between **2-Row Summary**, **Compact Badge**, or **Hidden**.
 
-### 5. 📊 Live Academic Ledger & Score Distribution
+### 5. 📊 Live Academic Ledger and Score Distribution
 - **Detailed Metric Sums**: Total courses completed, cumulative credits, score percentage average ($0-100\%$), unweighted QP sum, and weighted QP sum.
 - **Score Extremes**: Identifies highest-scoring and lowest-scoring courses across your transcript.
 - **Grade Distribution Spectrum**: Real-time counter of letter grade counts ($A+, A, A-, B+, B, B-, C+, C, C-, D, F$).
