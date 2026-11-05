@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   calculateUcGpa,
@@ -402,6 +402,11 @@ export default function Home() {
   const [aiTargetTermId, setAiTargetTermId] = useState<string>("new");
   const [aiImportMode, setAiImportMode] = useState<"append" | "replace">("append");
 
+  // View layout modes & summary display settings
+  const [viewLayoutMode, setViewLayoutMode] = useState<"separate" | "combined_year">("separate");
+  const [summaryDisplayMode, setSummaryDisplayMode] = useState<"2row" | "compact" | "hidden">("2row");
+  const [primaryGpaFocus, setPrimaryGpaFocus] = useState<"unweighted" | "weighted">("unweighted");
+
   // Server-side AI mentoring helpers
   const [isGeneratingMentorAdvice, setIsGeneratingMentorAdvice] = useState<boolean>(false);
   const [isGeneratingSemesterAdvice, setIsGeneratingSemesterAdvice] = useState<Record<string, boolean>>({});
@@ -758,6 +763,21 @@ export default function Home() {
         }
       }
 
+      const storedViewLayout = localStorage.getItem("gpaTracker_viewLayoutMode");
+      if (storedViewLayout === "separate" || storedViewLayout === "combined_year") {
+        setViewLayoutMode(storedViewLayout);
+      }
+
+      const storedSummaryMode = localStorage.getItem("gpaTracker_summaryDisplayMode");
+      if (storedSummaryMode === "2row" || storedSummaryMode === "compact" || storedSummaryMode === "hidden") {
+        setSummaryDisplayMode(storedSummaryMode);
+      }
+
+      const storedPrimaryFocus = localStorage.getItem("gpaTracker_primaryGpaFocus");
+      if (storedPrimaryFocus === "unweighted" || storedPrimaryFocus === "weighted") {
+        setPrimaryGpaFocus(storedPrimaryFocus);
+      }
+
       setCompletedHydration(true);
     };
 
@@ -803,6 +823,21 @@ export default function Home() {
   const syncCustomGeminiApiKey = (val: string) => {
     setCustomGeminiApiKey(val);
     localStorage.setItem("gpaTracker_geminiApiKey", val);
+  };
+
+  const syncViewLayoutMode = (val: "separate" | "combined_year") => {
+    setViewLayoutMode(val);
+    localStorage.setItem("gpaTracker_viewLayoutMode", val);
+  };
+
+  const syncSummaryDisplayMode = (val: "2row" | "compact" | "hidden") => {
+    setSummaryDisplayMode(val);
+    localStorage.setItem("gpaTracker_summaryDisplayMode", val);
+  };
+
+  const syncPrimaryGpaFocus = (val: "unweighted" | "weighted") => {
+    setPrimaryGpaFocus(val);
+    localStorage.setItem("gpaTracker_primaryGpaFocus", val);
   };
 
   // GPA calculation helper
@@ -876,6 +911,272 @@ export default function Home() {
     }))
   })));
   const currentAccent = INK_ACCENTS.find((p) => p.name === activeAccent) || INK_ACCENTS[0];
+
+  // Detailed summary of all entered courses & scores
+  const detailedSummary = useMemo(() => {
+    let totalCoursesCount = 0;
+    let totalCredits = 0;
+    let totalWeightedQP = 0;
+    let totalUnweightedQP = 0;
+    let totalCollegiateQP = 0;
+    let scoreSum = 0;
+    let scoreCount = 0;
+    let minScore = Infinity;
+    let maxScore = -Infinity;
+    let highestCourse: { name: string; score: number } | null = null;
+    let lowestCourse: { name: string; score: number } | null = null;
+
+    const gradeCounts: Record<string, number> = {
+      "A+": 0,
+      "A": 0,
+      "A-": 0,
+      "B+": 0,
+      "B": 0,
+      "B-": 0,
+      "C+": 0,
+      "C": 0,
+      "C-": 0,
+      "D": 0,
+      "F": 0,
+    };
+
+    const semesterSummaries = terms.map((term, termIdx) => {
+      let termCredits = 0;
+      let termWeightedQP = 0;
+      let termUnweightedQP = 0;
+      let termCourseCount = 0;
+      let termScoreSum = 0;
+
+      term.courses.forEach((c) => {
+        let scoreNum = parseFloat(c.score);
+        const creditNum = parseFloat(c.credit);
+        if (!isNaN(scoreNum) && !isNaN(creditNum)) {
+          if (roundScores) scoreNum = Math.round(scoreNum);
+          const gp = convertScoreToGradePoint(scoreNum, useLinearGpa);
+          let col4 = 0;
+          if (scoreNum >= 90) col4 = 4.0;
+          else if (scoreNum >= 80) col4 = 3.0;
+          else if (scoreNum >= 70) col4 = 2.0;
+          else if (scoreNum >= 60) col4 = 1.0;
+
+          let boost = 0;
+          if (c.level === "Honors") boost = 0.5;
+          else if (c.level === "AP/IB") boost = 1.0;
+          else if (c.level === "Custom" && c.weightBoost) boost = parseFloat(c.weightBoost) || 0;
+
+          const wQp = (gp + boost) * creditNum;
+          const uQp = gp * creditNum;
+
+          termCredits += creditNum;
+          termWeightedQP += wQp;
+          termUnweightedQP += uQp;
+          termCourseCount += 1;
+          termScoreSum += scoreNum;
+
+          totalCredits += creditNum;
+          totalWeightedQP += wQp;
+          totalUnweightedQP += uQp;
+          totalCollegiateQP += col4 * creditNum;
+          totalCoursesCount += 1;
+          scoreSum += scoreNum;
+          scoreCount += 1;
+
+          if (scoreNum > maxScore) {
+            maxScore = scoreNum;
+            highestCourse = { name: c.courseName || "Course", score: scoreNum };
+          }
+          if (scoreNum < minScore) {
+            minScore = scoreNum;
+            lowestCourse = { name: c.courseName || "Course", score: scoreNum };
+          }
+
+          const letter = convertScoreToLetterGrade(scoreNum);
+          if (gradeCounts[letter] !== undefined) {
+            gradeCounts[letter] += 1;
+          }
+        }
+      });
+
+      const termUnweightedGpa = termCredits > 0 ? (termUnweightedQP / termCredits).toFixed(2) : "0.00";
+      const termWeightedGpa = termCredits > 0 ? (termWeightedQP / termCredits).toFixed(2) : "0.00";
+      const termAvgScore = termCourseCount > 0 ? (termScoreSum / termCourseCount).toFixed(1) : "0.0";
+
+      return {
+        id: term.id,
+        title: term.title || `Semester ${termIdx + 1}`,
+        gradeLevel: term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx),
+        courseCount: termCourseCount,
+        credits: termCredits,
+        unweightedQP: termUnweightedQP.toFixed(2),
+        weightedQP: termWeightedQP.toFixed(2),
+        unweightedGpa: termUnweightedGpa,
+        weightedGpa: termWeightedGpa,
+        avgScore: termAvgScore,
+      };
+    });
+
+    const avgScore = scoreCount > 0 ? (scoreSum / scoreCount).toFixed(1) : "0.0";
+    const overallUnweightedGpa = totalCredits > 0 ? (totalUnweightedQP / totalCredits).toFixed(2) : "0.00";
+    const overallWeightedGpa = totalCredits > 0 ? (totalWeightedQP / totalCredits).toFixed(2) : "0.00";
+    const overallCollegiateGpa = totalCredits > 0 ? (totalCollegiateQP / totalCredits).toFixed(2) : "0.00";
+
+    return {
+      totalCoursesCount,
+      totalCredits,
+      totalWeightedQP: totalWeightedQP.toFixed(2),
+      totalUnweightedQP: totalUnweightedQP.toFixed(2),
+      overallUnweightedGpa,
+      overallWeightedGpa,
+      overallCollegiateGpa,
+      avgScore,
+      minScore: minScore === Infinity ? 0 : minScore,
+      maxScore: maxScore === -Infinity ? 0 : maxScore,
+      highestCourse,
+      lowestCourse,
+      gradeCounts,
+      semesterSummaries,
+    };
+  }, [terms, roundScores, useLinearGpa]);
+
+  // Combined Academic Years grouping (Grade 9, Grade 10, Grade 11, Grade 12)
+  const academicYears = useMemo(() => {
+    const years: {
+      yearLabel: string;
+      gradeLevel: string;
+      terms: Term[];
+      stats: {
+        credits: number;
+        coursesCount: number;
+        unweightedQP: number;
+        weightedQP: number;
+        unweightedGpa: string;
+        weightedGpa: string;
+      };
+      pairedCourses: {
+        key: string;
+        courseName: string;
+        category: string;
+        agCategory: AgCategory;
+        sem1Course?: Course;
+        sem2Course?: Course;
+        sem1TermId?: string;
+        sem2TermId?: string;
+      }[];
+    }[] = [];
+
+    const processed = new Set<string>();
+
+    for (let i = 0; i < terms.length; i++) {
+      const t1 = terms[i];
+      if (processed.has(t1.id)) continue;
+
+      const grade = t1.gradeLevel || inferGradeLevelFromTermTitle(t1.title, i);
+      let t2: Term | null = null;
+
+      if (i + 1 < terms.length && !processed.has(terms[i + 1].id)) {
+        const nextT = terms[i + 1];
+        const nextGrade = nextT.gradeLevel || inferGradeLevelFromTermTitle(nextT.title, i + 1);
+        if (
+          nextGrade === grade ||
+          (t1.title.toLowerCase().includes("1") && nextT.title.toLowerCase().includes("2")) ||
+          (t1.title.toLowerCase().includes("semester 1") && nextT.title.toLowerCase().includes("semester 2"))
+        ) {
+          t2 = nextT;
+        }
+      }
+
+      const yearTerms = t2 ? [t1, t2] : [t1];
+      yearTerms.forEach((t) => processed.add(t.id));
+
+      let yrCredits = 0;
+      let yrUnweightedQP = 0;
+      let yrWeightedQP = 0;
+      let yrCourses = 0;
+
+      yearTerms.forEach((t) => {
+        t.courses.forEach((c) => {
+          const sc = parseFloat(c.score);
+          const cr = parseFloat(c.credit);
+          if (!isNaN(sc) && !isNaN(cr)) {
+            const roundedSc = roundScores ? Math.round(sc) : sc;
+            const gp = convertScoreToGradePoint(roundedSc, useLinearGpa);
+            let boost = 0;
+            if (c.level === "Honors") boost = 0.5;
+            else if (c.level === "AP/IB") boost = 1.0;
+            else if (c.level === "Custom" && c.weightBoost) boost = parseFloat(c.weightBoost) || 0;
+
+            yrCredits += cr;
+            yrCourses += 1;
+            yrUnweightedQP += gp * cr;
+            yrWeightedQP += (gp + boost) * cr;
+          }
+        });
+      });
+
+      const courseMap = new Map<
+        string,
+        {
+          key: string;
+          courseName: string;
+          category: string;
+          agCategory: AgCategory;
+          sem1Course?: Course;
+          sem2Course?: Course;
+          sem1TermId?: string;
+          sem2TermId?: string;
+        }
+      >();
+
+      t1.courses.forEach((c) => {
+        const key = (c.courseName || "Untitled").trim().toLowerCase();
+        courseMap.set(key, {
+          key,
+          courseName: c.courseName || "Untitled",
+          category: c.category || "Core Subjects",
+          agCategory: c.agCategory || detectAgCategoryFromName(c.courseName),
+          sem1Course: c,
+          sem1TermId: t1.id,
+        });
+      });
+
+      if (t2) {
+        t2.courses.forEach((c) => {
+          const key = (c.courseName || "Untitled").trim().toLowerCase();
+          const existing = courseMap.get(key);
+          if (existing) {
+            existing.sem2Course = c;
+            existing.sem2TermId = t2.id;
+          } else {
+            courseMap.set(key, {
+              key,
+              courseName: c.courseName || "Untitled",
+              category: c.category || "Core Subjects",
+              agCategory: c.agCategory || detectAgCategoryFromName(c.courseName),
+              sem2Course: c,
+              sem2TermId: t2.id,
+            });
+          }
+        });
+      }
+
+      years.push({
+        yearLabel: t2 ? `Grade ${grade} Academic Year` : t1.title,
+        gradeLevel: grade,
+        terms: yearTerms,
+        stats: {
+          credits: yrCredits,
+          coursesCount: yrCourses,
+          unweightedQP: yrUnweightedQP,
+          weightedQP: yrWeightedQP,
+          unweightedGpa: yrCredits > 0 ? (yrUnweightedQP / yrCredits).toFixed(2) : "0.00",
+          weightedGpa: yrCredits > 0 ? (yrWeightedQP / yrCredits).toFixed(2) : "0.00",
+        },
+        pairedCourses: Array.from(courseMap.values()),
+      });
+    }
+
+    return years;
+  }, [terms, roundScores, useLinearGpa]);
 
   // Target Graduation Calculations
   const targetDiffGpa = parseFloat(targetGpa);
@@ -980,6 +1281,55 @@ export default function Home() {
         return {
           ...t,
           courses: [...t.courses, newCourse]
+        };
+      }
+      return t;
+    });
+    syncTerms(updated);
+  };
+
+  const handleAddSubjectToAcademicYear = (ay: (typeof academicYears)[0]) => {
+    const timestamp = Date.now();
+    const updated = terms.map((t) => {
+      if (ay.terms.some((yt) => yt.id === t.id)) {
+        const nextCourseNum = t.courses.length + 1;
+        const newCourse: Course = {
+          id: `course-${t.id}-${timestamp}-${nextCourseNum}`,
+          category: Object.keys(predefinedCourseCategories)[0],
+          courseName: "",
+          score: "",
+          credit: "1",
+          level: "Regular",
+          agCategory: "G",
+        };
+        return {
+          ...t,
+          courses: [...t.courses, newCourse],
+        };
+      }
+      return t;
+    });
+    syncTerms(updated);
+  };
+
+  const handleEnableCourseInPartnerSemester = (partnerTermId: string, baseCourse: Course) => {
+    const timestamp = Date.now();
+    const updated = terms.map((t) => {
+      if (t.id === partnerTermId) {
+        const nextCourseNum = t.courses.length + 1;
+        const newCourse: Course = {
+          id: `course-${partnerTermId}-${timestamp}-${nextCourseNum}`,
+          category: baseCourse.category,
+          courseName: baseCourse.courseName,
+          score: "",
+          credit: baseCourse.credit || "1",
+          level: baseCourse.level || "Regular",
+          agCategory: baseCourse.agCategory || "G",
+          weightBoost: baseCourse.weightBoost,
+        };
+        return {
+          ...t,
+          courses: [...t.courses, newCourse],
         };
       }
       return t;
@@ -1789,26 +2139,67 @@ export default function Home() {
                 
                 {/* Clean Hero Presentation */}
                 <div className="glass-panel rounded-2xl p-8 flex flex-col items-center text-center relative overflow-hidden border border-[#1A1A1A]/10">
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded mb-4 uppercase tracking-[0.15em]">
-                    Local Device Sync
-                  </span>
-                  <h1 className="text-[#1A1A1A] font-light leading-[1.0] tracking-tighter mb-4" style={{ fontFamily: "Georgia, serif", fontSize: "3rem" }}>
-                    Memories <br/>Stored <br/>
-                    <span className="italic font-normal">Local.</span>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold uppercase tracking-[0.15em] mb-4">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span>100% Sovereign Local Storage</span>
+                  </div>
+                  <h1 className="text-[#1A1A1A] font-light leading-[1.0] tracking-tighter mb-4" style={{ fontFamily: "Georgia, serif", fontSize: "3.2rem" }}>
+                    Academic <br/>Ledger &amp; <br/>
+                    <span className="italic font-normal" style={{ color: currentAccent.color }}>GPA Tracker.</span>
                   </h1>
                   <p className="text-sm leading-relaxed max-w-sm mb-6 text-slate-650">
-                    Your academic data never leaves this machine. A sovereign digital ledger designed for private GPA tracking and semester reflection entries.
+                    Your grades and reflections never leave this device. Multi-system calculation for High School, College, and University of California admissions with AI transcript scanning.
                   </p>
+
+                  {/* Feature Badges Grid */}
+                  <div className="grid grid-cols-2 gap-2 w-full mb-6 text-left">
+                    <div className="p-2.5 bg-white/70 border border-[#1A1A1A]/10 rounded-lg flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px] text-amber-600">auto_awesome</span>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-900 block leading-tight">Gemini 3.5 Flash-Lite</span>
+                        <span className="text-[8px] text-slate-400">OCR Transcript Scan</span>
+                      </div>
+                    </div>
+                    <div className="p-2.5 bg-white/70 border border-[#1A1A1A]/10 rounded-lg flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px] text-amber-700">school</span>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-900 block leading-tight">UC Admissions A-G</span>
+                        <span className="text-[8px] text-slate-400">Capped &amp; Uncapped</span>
+                      </div>
+                    </div>
+                    <div className="p-2.5 bg-white/70 border border-[#1A1A1A]/10 rounded-lg flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px] text-blue-600">view_column</span>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-900 block leading-tight">Dual-Semester View</span>
+                        <span className="text-[8px] text-slate-400">2-Row Year Comparison</span>
+                      </div>
+                    </div>
+                    <div className="p-2.5 bg-white/70 border border-[#1A1A1A]/10 rounded-lg flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px] text-emerald-600">verified_user</span>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-900 block leading-tight">Zero Cloud Storage</span>
+                        <span className="text-[8px] text-slate-400">Browser-Only Sovereign</span>
+                      </div>
+                    </div>
+                  </div>
 
                   <div className="flex flex-col gap-2.5 w-full">
                     <button
                       onClick={() => toggleHomeView(false)}
-                      className="w-full py-4 bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white text-xs uppercase tracking-[0.2em] font-bold rounded transition-all flex items-center justify-center gap-2"
+                      className="w-full py-4 bg-[#1A1A1A] hover:bg-[#2C2C2C] text-white text-xs uppercase tracking-[0.2em] font-bold rounded transition-all flex items-center justify-center gap-2 shadow-sm"
                     >
                       <span className="material-symbols-outlined text-[18px]">dashboard</span>
-                      <span>Enter Tracker</span>
+                      <span>Launch Live Tracker</span>
                     </button>
                     
+                    <button
+                      onClick={() => setIsAiTranscriptModalOpen(true)}
+                      className="w-full py-3 bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-300/70 text-xs uppercase tracking-[0.15em] font-bold rounded transition-all flex items-center justify-center gap-2"
+                    >
+                      <span className="material-symbols-outlined text-[18px] text-amber-600">auto_awesome</span>
+                      <span>AI Transcript Scanner</span>
+                    </button>
+
                     <button
                       onClick={handleResetDashboard}
                       className="text-[9px] uppercase tracking-[0.15em] font-bold text-red-500 hover:text-red-700 hover:bg-red-50/50 py-1.5 px-3 rounded transition-colors self-center mt-2"
@@ -1820,23 +2211,32 @@ export default function Home() {
 
                 {/* Local Stats Achievement Snapshot */}
                 <div className="glass-panel rounded-2xl p-6 border border-[#1A1A1A]/10">
-                  <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.2em] mb-4 border-b border-[#1A1A1A]/10 pb-2.5 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[#1A1A1A] text-[18px]">workspace_premium</span>
-                    <span>Device Record Overview</span>
+                  <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.2em] mb-4 border-b border-[#1A1A1A]/10 pb-2.5 flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[#1A1A1A] text-[18px]">workspace_premium</span>
+                      <span>Device Record Overview</span>
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-400">{detailedSummary.totalCoursesCount} Courses</span>
                   </h3>
                   
                   <div className="grid grid-cols-3 gap-3 text-center mb-4">
                     <div className="bg-white/50 p-3 rounded border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/15 transition-colors">
-                      <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Active GPA</span>
-                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.gpa}</span>
+                      <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Unwtd GPA</span>
+                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                        {totals.unweightedGpa}
+                      </span>
                     </div>
                     <div className="bg-white/50 p-3 rounded border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/15 transition-colors">
-                      <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Semesters</span>
-                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{terms.length}</span>
+                      <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Weighted GPA</span>
+                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                        {totals.gpa}
+                      </span>
                     </div>
                     <div className="bg-white/50 p-3 rounded border border-[#1A1A1A]/5 hover:border-[#1A1A1A]/15 transition-colors">
                       <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">Credits</span>
-                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.totalCredits}</span>
+                      <span className="block text-2.5xl font-light italic mt-1 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                        {totals.totalCredits}
+                      </span>
                     </div>
                   </div>
 
@@ -2172,35 +2572,93 @@ export default function Home() {
                     </>
                   ) : (
                     <>
-                      <h1 className="text-7xl lg:text-8xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
-                        {totals.gpa}
-                      </h1>
-                      <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">Standard Weighted GPA</p>
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-center gap-2 mt-1">
-                        <span>Unweighted 4.0: <strong className="text-slate-800">{totals.collegiateUnweightedGpa}</strong></span>
-                        <span>&bull;</span>
-                        <span>Unweighted 4.33: <strong className="text-slate-800">{totals.unweightedGpa}</strong></span>
+                      {/* Standard GPA Header & Primary Focus Selector */}
+                      <div className="flex items-center justify-center p-1 bg-slate-100 rounded-xl mb-3 text-[10px] font-bold uppercase tracking-wider">
+                        <button
+                          type="button"
+                          onClick={() => syncPrimaryGpaFocus("unweighted")}
+                          className={`px-3 py-1 rounded-lg transition-all ${
+                            primaryGpaFocus === "unweighted"
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-500 hover:text-slate-900"
+                          }`}
+                        >
+                          Unweighted 4.33
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => syncPrimaryGpaFocus("weighted")}
+                          className={`px-3 py-1 rounded-lg transition-all ${
+                            primaryGpaFocus === "weighted"
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-500 hover:text-slate-900"
+                          }`}
+                        >
+                          Weighted (+AP/IB)
+                        </button>
                       </div>
 
-                      {/* Normal GPA Stats Grid matching Image 2: Sum of (Grade Point × Credits) / Total Credits */}
-                      <div className="grid grid-cols-2 gap-4 w-full mt-6">
-                        <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
-                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Sum of (GP × Credits)</span>
-                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>{totals.qualityPoints}</span>
-                          <span className="text-[8px] text-slate-400">Total Quality Points</span>
+                      {primaryGpaFocus === "unweighted" ? (
+                        <>
+                          <h1 className="text-7xl lg:text-8xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                            {totals.unweightedGpa}
+                          </h1>
+                          <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">
+                            Official Unweighted GPA (4.33 Scale)
+                          </p>
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-center gap-2 mt-1">
+                            <span>Weighted: <strong className="text-slate-800">{totals.gpa}</strong></span>
+                            <span>&bull;</span>
+                            <span>Collegiate 4.00: <strong className="text-slate-800">{totals.collegiateUnweightedGpa}</strong></span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <h1 className="text-7xl lg:text-8xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                            {totals.gpa}
+                          </h1>
+                          <p className="text-slate-500 font-bold text-xs uppercase tracking-[0.2em] mb-1">
+                            Standard Weighted GPA
+                          </p>
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center justify-center gap-2 mt-1">
+                            <span>Unweighted 4.33: <strong className="text-slate-800">{totals.unweightedGpa}</strong></span>
+                            <span>&bull;</span>
+                            <span>Collegiate 4.00: <strong className="text-slate-800">{totals.collegiateUnweightedGpa}</strong></span>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Normal GPA Stats Grid: Sum of (Grade Point × Credits) / Total Credits */}
+                      <div className="grid grid-cols-2 gap-3 w-full mt-6">
+                        <div className="bg-white border border-[#1A1A1A]/10 p-3 rounded flex flex-col items-center gap-0.5">
+                          <span className="text-slate-500 text-[8.5px] uppercase tracking-wider font-bold">Sum of (GP × Credits)</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                            {primaryGpaFocus === "unweighted" ? totals.unweightedQualityPoints : totals.qualityPoints}
+                          </span>
+                          <span className="text-[7.5px] text-slate-400">
+                            {primaryGpaFocus === "unweighted" ? "Unweighted QP" : "Total Quality Points"}
+                          </span>
                         </div>
-                        <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
-                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Total Credits</span>
-                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.totalCredits}</span>
-                          <span className="text-[8px] text-slate-400">Completed Credits</span>
+                        <div className="bg-white border border-[#1A1A1A]/10 p-3 rounded flex flex-col items-center gap-0.5">
+                          <span className="text-slate-500 text-[8.5px] uppercase tracking-wider font-bold">Total Credits</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                            {totals.totalCredits}
+                          </span>
+                          <span className="text-[7.5px] text-slate-400">Completed Hours</span>
                         </div>
                       </div>
 
-                      {/* Formula Step-by-Step Breakdown (Image 2) */}
+                      {/* Formula Step-by-Step Breakdown */}
                       <div className="w-full mt-3 p-2.5 bg-slate-50 border border-slate-200/70 rounded-lg text-left space-y-1 font-mono text-[10px]">
                         <div className="flex justify-between items-center text-slate-900 font-bold">
-                          <span className="font-sans text-[9px] uppercase tracking-wider text-slate-500">Normal GPA Formula:</span>
-                          <span>{totals.qualityPoints} ÷ {totals.totalCredits || 1} = {totals.gpa}</span>
+                          <span className="font-sans text-[9px] uppercase tracking-wider text-slate-500">
+                            {primaryGpaFocus === "unweighted" ? "Unweighted GPA Formula:" : "Weighted GPA Formula:"}
+                          </span>
+                          <span>
+                            {primaryGpaFocus === "unweighted"
+                              ? `${totals.unweightedQualityPoints} ÷ ${totals.totalCredits || 1} = ${totals.unweightedGpa}`
+                              : `${totals.qualityPoints} ÷ ${totals.totalCredits || 1} = ${totals.gpa}`}
+                          </span>
                         </div>
                         <div className="text-[8.5px] text-slate-400 font-sans italic pt-0.5 border-t border-slate-200/50">
                           Formula: GPA = Sum of (Grade Point × Credits) ÷ Total Credits
@@ -2221,113 +2679,134 @@ export default function Home() {
                   </button>
                 </div>
 
-                {/* All Weighted & Unweighted GPAs Ledger Card */}
+                {/* Detailed Academic Ledger & Score Sum Card */}
                 <div className="glass-panel rounded-2xl p-5 border border-[#1A1A1A]/10">
-                  <div className="flex items-center justify-between mb-3 border-b border-[#1A1A1A]/10 pb-2.5">
+                  <div className="flex items-center justify-between mb-4 border-b border-[#1A1A1A]/10 pb-3">
                     <div className="flex items-center gap-2">
                       <div className="bg-[#1A1A1A]/5 p-1.5 rounded text-[#1A1A1A] flex items-center justify-center" style={{ color: currentAccent.color }}>
-                        <span className="material-symbols-outlined text-[18px]">format_list_numbered</span>
+                        <span className="material-symbols-outlined text-[18px]">query_stats</span>
                       </div>
                       <div>
                         <h3 className="font-bold text-[#1A1A1A] text-xs uppercase tracking-[0.15em]" style={{ color: currentAccent.color }}>
-                          All Weighted &amp; Unweighted GPAs
+                          Academic Ledger &amp; Score Sum
                         </h3>
-                        <span className="text-[9px] text-slate-500">Multi-System Comparison Ledger</span>
+                        <span className="text-[9px] text-slate-500">Live Course &amp; Performance Audit</span>
                       </div>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 font-bold text-slate-700">
+                      {detailedSummary.totalCoursesCount} Courses
+                    </span>
+                  </div>
+
+                  {/* Key Metrics Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center mb-4">
+                    <div className="p-2.5 bg-white border border-[#1A1A1A]/10 rounded flex flex-col">
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400">Total Credits</span>
+                      <span className="text-xl font-light italic mt-0.5 text-slate-900" style={{ fontFamily: "Georgia, serif" }}>
+                        {detailedSummary.totalCredits}
+                      </span>
+                      <span className="text-[7.5px] text-slate-400">Completed Hours</span>
+                    </div>
+                    <div className="p-2.5 bg-white border border-[#1A1A1A]/10 rounded flex flex-col">
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400">Score Average</span>
+                      <span className="text-xl font-light italic mt-0.5" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                        {detailedSummary.avgScore}%
+                      </span>
+                      <span className="text-[7.5px] text-slate-400">All Graded Courses</span>
+                    </div>
+                    <div className="p-2.5 bg-white border border-[#1A1A1A]/10 rounded flex flex-col col-span-2 sm:col-span-1">
+                      <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400">Unweighted QP</span>
+                      <span className="text-xl font-light italic mt-0.5 text-slate-900" style={{ fontFamily: "Georgia, serif" }}>
+                        {detailedSummary.totalUnweightedQP}
+                      </span>
+                      <span className="text-[7.5px] text-slate-400">Sum of (GP × Cr)</span>
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    {/* Section 1: Standard High School */}
-                    <div>
-                      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                        <span>High School Standard</span>
-                        <span className="text-[8px] font-mono lowercase text-slate-400">Sum(GP × Cr) ÷ Total Cr</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="p-2.5 bg-white border border-[#1A1A1A]/10 rounded flex flex-col">
-                          <span className="text-[8.5px] font-bold uppercase tracking-wider text-slate-500">HS Weighted</span>
-                          <span className="text-2xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
-                            {totals.gpa}
-                          </span>
-                          <span className="text-[8px] text-slate-400">AP/IB (+1.0) &amp; Honors (+0.5)</span>
-                        </div>
-                        <div className="p-2.5 bg-white border border-[#1A1A1A]/10 rounded flex flex-col">
-                          <span className="text-[8.5px] font-bold uppercase tracking-wider text-slate-500">HS Unweighted 4.0</span>
-                          <span className="text-2xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
-                            {totals.collegiateUnweightedGpa}
-                          </span>
-                          <span className="text-[8px] text-slate-400">Collegiate standard (max 4.00)</span>
-                        </div>
-                      </div>
-                      <div className="mt-1.5 px-2 py-1.5 bg-slate-50/80 border border-slate-200/60 rounded flex items-center justify-between text-xs">
-                        <span className="text-[9px] font-medium text-slate-600">HS Unweighted (4.33 Scale):</span>
-                        <span className="font-mono font-bold text-slate-800">{totals.unweightedGpa}</span>
-                      </div>
+                  {/* Score Extremes & Range */}
+                  <div className="p-2.5 bg-slate-50/90 border border-slate-200/70 rounded-lg text-xs mb-4 space-y-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-slate-500 font-medium">Highest Scored Course:</span>
+                      <span className="font-bold text-slate-800 truncate ml-2">
+                        {detailedSummary.highestCourse ? `${(detailedSummary.highestCourse as any).name} (${(detailedSummary.highestCourse as any).score}%)` : "—"}
+                      </span>
                     </div>
-
-                    {/* Section 2: University of California Admissions Standard (10th-11th) */}
-                    <div className="pt-2 border-t border-[#1A1A1A]/10">
-                      <div className="text-[9px] font-bold text-amber-900 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                        <span className="flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[13px] text-amber-700">school</span>
-                          <span>UC Admissions Standard (10th &amp; 11th Grade)</span>
-                        </span>
-                        <span className="text-[8px] font-mono text-amber-800 font-normal">Base Pts ÷ Total Courses</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        <div className="p-2 bg-amber-50/70 border border-amber-300/70 rounded flex flex-col items-center text-center">
-                          <span className="text-[8px] font-bold uppercase tracking-wider text-amber-900">UC Capped</span>
-                          <span className="text-xl font-light italic mt-0.5 text-amber-950 font-bold" style={{ fontFamily: "Georgia, serif" }}>
-                            {ucTotals.cappedWeightedGpa}
-                          </span>
-                          <span className="text-[7.5px] text-amber-800">8 sem cap</span>
-                        </div>
-                        <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex flex-col items-center text-center">
-                          <span className="text-[8px] font-bold uppercase tracking-wider text-slate-600">UC Fully Wtd</span>
-                          <span className="text-xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
-                            {ucTotals.fullyWeightedGpa}
-                          </span>
-                          <span className="text-[7.5px] text-slate-400">Uncapped honors</span>
-                        </div>
-                        <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex flex-col items-center text-center">
-                          <span className="text-[8px] font-bold uppercase tracking-wider text-slate-600">UC Unweighted</span>
-                          <span className="text-xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
-                            {ucTotals.unweightedGpa}
-                          </span>
-                          <span className="text-[7.5px] text-slate-400">Truncated (no round)</span>
-                        </div>
-                      </div>
-                      <div className="mt-1.5 p-1.5 bg-amber-50/50 border border-amber-200/50 rounded flex items-center justify-between text-[9px] text-amber-900 font-mono">
-                        <span>10th-11th Base Points: <strong>{ucTotals.tenthEleventhBasePoints}</strong></span>
-                        <span>•</span>
-                        <span>Courses: <strong>{ucTotals.tenthEleventhCoursesCount}</strong></span>
-                        <span>•</span>
-                        <span>Honors: <strong>{ucTotals.honorsPointsApplied} / 8</strong></span>
-                      </div>
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-slate-500 font-medium">Lowest Scored Course:</span>
+                      <span className="font-bold text-slate-800 truncate ml-2">
+                        {detailedSummary.lowestCourse ? `${(detailedSummary.lowestCourse as any).name} (${(detailedSummary.lowestCourse as any).score}%)` : "—"}
+                      </span>
                     </div>
+                    <div className="flex items-center justify-between text-[10px] pt-1 border-t border-slate-200/60">
+                      <span className="text-slate-500 font-medium">Weighted Quality Points Sum:</span>
+                      <span className="font-mono font-bold text-slate-800">{detailedSummary.totalWeightedQP} QP</span>
+                    </div>
+                  </div>
 
-                    {/* Section 3: Cumulative UC System (9th-12th Grade) */}
-                    <div className="pt-2 border-t border-[#1A1A1A]/10">
-                      <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                        <span>Cumulative UC Scale (Grades 9–12)</span>
-                        <span className="text-[8px] font-mono lowercase text-slate-400">All High School A-G</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex items-center justify-between text-xs">
-                          <span className="text-[9px] font-medium text-slate-600">Cumulative Weighted:</span>
-                          <span className="font-mono font-bold text-slate-800 text-sm">{ucTotals.cumulativeWeightedGpa}</span>
+                  {/* Grade Distribution Spectrum */}
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                      <span>Grade Distribution Spectrum</span>
+                      <span>{detailedSummary.totalCoursesCount} Total</span>
+                    </div>
+                    <div className="grid grid-cols-6 sm:grid-cols-11 gap-1 text-center font-mono">
+                      {Object.entries(detailedSummary.gradeCounts).map(([grd, count]) => (
+                        <div key={grd} className="bg-white border border-[#1A1A1A]/10 rounded py-1 px-0.5 flex flex-col items-center">
+                          <span className="text-[8px] font-bold text-slate-500">{grd}</span>
+                          <span className={`text-[11px] font-bold ${count > 0 ? "text-slate-900" : "text-slate-300"}`}>
+                            {count}
+                          </span>
                         </div>
-                        <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex items-center justify-between text-xs">
-                          <span className="text-[9px] font-medium text-slate-600">Cumulative Unweighted:</span>
-                          <span className="font-mono font-bold text-slate-800 text-sm">{ucTotals.cumulativeUnweightedGpa}</span>
-                        </div>
-                      </div>
-                      <div className="mt-1.5 p-1.5 bg-slate-50 border border-slate-200/50 rounded flex items-center justify-between text-[9px] text-slate-600 font-mono">
-                        <span>9-12 Base Points: <strong>{ucTotals.cumulativeBasePoints}</strong></span>
-                        <span>•</span>
-                        <span>Total A-G Courses: <strong>{ucTotals.cumulativeCoursesCount}</strong></span>
-                      </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Per-Semester Breakdown Ledger Table */}
+                  <div>
+                    <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Semester Breakdown Ledger
+                    </div>
+                    <div className="overflow-x-auto border border-[#1A1A1A]/10 rounded-lg bg-white">
+                      <table className="w-full text-left text-[10px] font-mono">
+                        <thead className="bg-slate-50/90 text-slate-500 uppercase text-[8px] tracking-wider border-b border-slate-200/60">
+                          <tr>
+                            <th className="py-1.5 px-2 font-bold">Term / Grade</th>
+                            <th className="py-1.5 px-1 font-bold text-center">Courses</th>
+                            <th className="py-1.5 px-1 font-bold text-center">Credits</th>
+                            <th className="py-1.5 px-1 font-bold text-center">Avg %</th>
+                            <th className="py-1.5 px-1.5 font-bold text-right text-slate-800">Unwtd</th>
+                            <th className="py-1.5 px-2 font-bold text-right">Wtd</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-700">
+                          {detailedSummary.semesterSummaries.map((s, idx) => (
+                            <tr key={s.id || idx} className="hover:bg-slate-50/60 transition-colors">
+                              <td className="py-1.5 px-2 font-sans font-medium text-slate-900 truncate max-w-[100px]" title={s.title}>
+                                {s.title}
+                              </td>
+                              <td className="py-1.5 px-1 text-center">{s.courseCount}</td>
+                              <td className="py-1.5 px-1 text-center font-bold">{s.credits}</td>
+                              <td className="py-1.5 px-1 text-center">{s.avgScore}%</td>
+                              <td className="py-1.5 px-1.5 text-right font-bold text-slate-900" style={{ color: currentAccent.color }}>
+                                {s.unweightedGpa}
+                              </td>
+                              <td className="py-1.5 px-2 text-right">{s.weightedGpa}</td>
+                            </tr>
+                          ))}
+                          {detailedSummary.semesterSummaries.length > 1 && (
+                            <tr className="bg-slate-50/80 font-bold border-t border-slate-200 text-slate-900">
+                              <td className="py-1.5 px-2 font-sans uppercase text-[8px] tracking-wider">Total Ledger</td>
+                              <td className="py-1.5 px-1 text-center">{detailedSummary.totalCoursesCount}</td>
+                              <td className="py-1.5 px-1 text-center">{detailedSummary.totalCredits}</td>
+                              <td className="py-1.5 px-1 text-center">{detailedSummary.avgScore}%</td>
+                              <td className="py-1.5 px-1.5 text-right text-slate-950 font-black" style={{ color: currentAccent.color }}>
+                                {detailedSummary.overallUnweightedGpa}
+                              </td>
+                              <td className="py-1.5 px-2 text-right">{detailedSummary.overallWeightedGpa}</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </div>
@@ -2659,68 +3138,572 @@ export default function Home() {
 
               {/* RIGHT COLUMN: Course Inputs & Semesters */}
               <section className="lg:col-span-7 flex flex-col gap-6 pb-20">
-                <header className="flex items-center justify-between px-2 pb-2 border-b border-[#1A1A1A]/10">
-                  <h2 className="text-[#1A1A1A] font-light italic text-4xl tracking-tight" style={{ fontFamily: "Georgia, serif" }}>
-                    My Courses
-                  </h2>
-                  <button
-                    onClick={handleResetDashboard}
-                    className="text-xs font-bold uppercase tracking-widest text-red-500 hover:text-red-700 transition-colors flex items-center gap-1 py-1.5 px-3 hover:bg-red-50 rounded focus:outline-none"
-                    id="resetBtn"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">delete_sweep</span> Reset
-                  </button>
+                <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-2 pb-3 border-b border-[#1A1A1A]/10">
+                  <div>
+                    <h2 className="text-[#1A1A1A] font-light italic text-4xl tracking-tight" style={{ fontFamily: "Georgia, serif" }}>
+                      My Courses
+                    </h2>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5">
+                      Academic Record Entry &amp; Audit
+                    </p>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* View Layout Mode Toggle */}
+                    <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/70 text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => syncViewLayoutMode("separate")}
+                        className={`px-2.5 py-1 rounded transition-all flex items-center gap-1 ${
+                          viewLayoutMode === "separate"
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-500 hover:text-slate-900"
+                        }`}
+                        title="View and edit individual semesters sequentially"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">view_agenda</span>
+                        <span>Single Semesters</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => syncViewLayoutMode("combined_year")}
+                        className={`px-2.5 py-1 rounded transition-all flex items-center gap-1 ${
+                          viewLayoutMode === "combined_year"
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-500 hover:text-slate-900"
+                        }`}
+                        title="Combine Sem 1 & Sem 2 side by side per academic year (matching transcripts)"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">view_column</span>
+                        <span>Combined 2-Sem Year</span>
+                      </button>
+                    </div>
+
+                    {/* Summary Display Mode Toggle */}
+                    <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/70 text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => syncSummaryDisplayMode("2row")}
+                        className={`px-2 py-1 rounded transition-all ${
+                          summaryDisplayMode === "2row"
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-500 hover:text-slate-900"
+                        }`}
+                        title="Show 2-row comparison summary of Semester 1 vs Semester 2"
+                      >
+                        2-Row Summary
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => syncSummaryDisplayMode("compact")}
+                        className={`px-2 py-1 rounded transition-all ${
+                          summaryDisplayMode === "compact"
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-500 hover:text-slate-900"
+                        }`}
+                        title="Compact summary pills"
+                      >
+                        Compact
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => syncSummaryDisplayMode("hidden")}
+                        className={`px-2 py-1 rounded transition-all ${
+                          summaryDisplayMode === "hidden"
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-500 hover:text-slate-900"
+                        }`}
+                        title="Hide term summaries"
+                      >
+                        Hide
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={handleResetDashboard}
+                      className="text-xs font-bold uppercase tracking-widest text-red-500 hover:text-red-700 transition-colors flex items-center gap-1 py-1 px-2.5 hover:bg-red-50 rounded focus:outline-none ml-auto"
+                      id="resetBtn"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">delete_sweep</span> Reset
+                    </button>
+                  </div>
                 </header>
 
                 {/* MAIN CONTAINER FOR SEMESTERS */}
                 <div id="allTermsContainer" className="flex flex-col gap-10">
-                  {terms.map((term, termIdx) => (
-                    <div key={term.id} className="term-block animate-fade-in py-1">
-                      
-                      {/* Term Header Layout */}
-                      <div className="flex flex-wrap items-center gap-3 mb-4 group relative">
-                        <input
-                          type="text"
-                          value={term.title}
-                          onChange={(e) => handleUpdateTermTitle(term.id, e.target.value)}
-                          className="termTitle text-xl font-light italic text-[#1A1A1A] bg-transparent border-0 border-b border-transparent focus:border-[#1A1A1A] focus:ring-0 p-0 transition-all"
-                          style={{ fontFamily: "Georgia, serif" }}
-                        />
-                        <span className="material-symbols-outlined text-slate-400 text-[18px] opacity-0 group-hover:opacity-100 transition-opacity">
-                          edit
-                        </span>
+                  {viewLayoutMode === "combined_year" ? (
+                    /* =======================================================
+                       COMBINED 2-SEMESTER ACADEMIC YEAR VIEW
+                       (Pairs Sem 1 & Sem 2 side by side per subject)
+                       ======================================================= */
+                    academicYears.map((ay, ayIdx) => {
+                      const sem1 = ay.terms[0];
+                      const sem2 = ay.terms[1];
+                      const sem1Sum = detailedSummary.semesterSummaries.find((s) => s.id === sem1?.id);
+                      const sem2Sum = sem2 ? detailedSummary.semesterSummaries.find((s) => s.id === sem2.id) : null;
 
-                        {/* Grade Level Selector */}
-                        <div className="flex items-center gap-1.5 ml-1">
-                          <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Grade:</label>
-                          <select
-                            value={term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)}
-                            onChange={(e) => handleUpdateTermGradeLevel(term.id, e.target.value as any)}
-                            className="text-[10px] font-bold py-1 px-2 border border-[#1A1A1A]/10 rounded bg-white/80 text-slate-700 cursor-pointer focus:outline-none"
-                          >
-                            <option value="9">Grade 9</option>
-                            <option value="10">Grade 10</option>
-                            <option value="11">Grade 11</option>
-                            <option value="12">Grade 12</option>
-                            <option value="Other">Other</option>
-                          </select>
+                      return (
+                        <div key={ay.yearLabel + ayIdx} className="term-block animate-fade-in py-1">
+                          {/* Academic Year Header */}
+                          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 group relative pb-2 border-b border-[#1A1A1A]/10">
+                            <div className="flex items-center gap-3">
+                              <h3 className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                                {ay.yearLabel}
+                              </h3>
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                                Grade {ay.gradeLevel}
+                              </span>
+                              {useUcGpa && (ay.gradeLevel === "10" || ay.gradeLevel === "11") && (
+                                <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-300/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[11px] text-amber-600">verified</span>
+                                  <span>Counted in UC GPA (10th/11th)</span>
+                                </span>
+                              )}
+                            </div>
 
-                          {useUcGpa && ((term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)) === "10" || (term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)) === "11") && (
-                            <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-300/60 px-2 py-0.5 rounded-full flex items-center gap-1">
-                              <span className="material-symbols-outlined text-[11px] text-amber-600">verified</span>
-                              <span>Counted in UC GPA</span>
-                            </span>
+                            <div className="flex items-center gap-3 text-xs">
+                              <span className="text-slate-500 font-mono text-[10px]">
+                                Year Combined: <strong className="text-slate-900">{ay.stats.credits} Cr</strong> &bull; Unwtd:{" "}
+                                <strong className="text-slate-900" style={{ color: currentAccent.color }}>
+                                  {ay.stats.unweightedGpa}
+                                </strong>{" "}
+                                &bull; Wtd: <strong className="text-slate-900">{ay.stats.weightedGpa}</strong>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 2-Row Semester Summary Table (Comparing Sem 1 vs Sem 2) */}
+                          {summaryDisplayMode === "2row" && (
+                            <div className="mb-4 overflow-x-auto border border-[#1A1A1A]/10 rounded-xl bg-white p-3 shadow-xs">
+                              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center justify-between">
+                                <span className="flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[14px]">view_timeline</span>
+                                  <span>2-Row Semester Audit ({ay.yearLabel})</span>
+                                </span>
+                                <span className="text-[8px] font-mono text-slate-400">Comparing 1st Semester vs 2nd Semester</span>
+                              </div>
+                              <table className="w-full text-left text-[10px] font-mono">
+                                <thead className="bg-slate-50 text-slate-500 uppercase text-[8px] tracking-wider border-b border-slate-200/60">
+                                  <tr>
+                                    <th className="py-1 px-2 font-bold">Semester Period</th>
+                                    <th className="py-1 px-1 font-bold text-center">Courses</th>
+                                    <th className="py-1 px-1 font-bold text-center">Credits</th>
+                                    <th className="py-1 px-1 font-bold text-center">Avg %</th>
+                                    <th className="py-1 px-1.5 font-bold text-right text-slate-800">Unwtd GPA</th>
+                                    <th className="py-1 px-2 font-bold text-right">Wtd GPA</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-slate-700">
+                                  {sem1Sum && (
+                                    <tr className="hover:bg-slate-50/60">
+                                      <td className="py-1.5 px-2 font-sans font-medium text-slate-900 flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block"></span>
+                                        <span>{sem1Sum.title}</span>
+                                      </td>
+                                      <td className="py-1.5 px-1 text-center">{sem1Sum.courseCount}</td>
+                                      <td className="py-1.5 px-1 text-center font-bold">{sem1Sum.credits}</td>
+                                      <td className="py-1.5 px-1 text-center">{sem1Sum.avgScore}%</td>
+                                      <td className="py-1.5 px-1.5 text-right font-bold text-slate-900" style={{ color: currentAccent.color }}>
+                                        {sem1Sum.unweightedGpa}
+                                      </td>
+                                      <td className="py-1.5 px-2 text-right">{sem1Sum.weightedGpa}</td>
+                                    </tr>
+                                  )}
+                                  {sem2Sum ? (
+                                    <tr className="hover:bg-slate-50/60">
+                                      <td className="py-1.5 px-2 font-sans font-medium text-slate-900 flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                                        <span>{sem2Sum.title}</span>
+                                      </td>
+                                      <td className="py-1.5 px-1 text-center">{sem2Sum.courseCount}</td>
+                                      <td className="py-1.5 px-1 text-center font-bold">{sem2Sum.credits}</td>
+                                      <td className="py-1.5 px-1 text-center">{sem2Sum.avgScore}%</td>
+                                      <td className="py-1.5 px-1.5 text-right font-bold text-slate-900" style={{ color: currentAccent.color }}>
+                                        {sem2Sum.unweightedGpa}
+                                      </td>
+                                      <td className="py-1.5 px-2 text-right">{sem2Sum.weightedGpa}</td>
+                                    </tr>
+                                  ) : (
+                                    <tr className="text-slate-400 italic">
+                                      <td className="py-1.5 px-2 font-sans" colSpan={6}>
+                                        2nd Semester not yet registered for this grade.
+                                      </td>
+                                    </tr>
+                                  )}
+                                  <tr className="bg-slate-50/90 font-bold border-t border-slate-200 text-slate-900">
+                                    <td className="py-1.5 px-2 font-sans uppercase text-[8px] tracking-wider">Combined Year Total</td>
+                                    <td className="py-1.5 px-1 text-center">{ay.stats.coursesCount}</td>
+                                    <td className="py-1.5 px-1 text-center">{ay.stats.credits}</td>
+                                    <td className="py-1.5 px-1 text-center">
+                                      {sem1Sum && sem2Sum
+                                        ? ((parseFloat(sem1Sum.avgScore) + parseFloat(sem2Sum.avgScore)) / 2).toFixed(1) + "%"
+                                        : sem1Sum?.avgScore + "%"}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 text-right text-slate-950 font-black" style={{ color: currentAccent.color }}>
+                                      {ay.stats.unweightedGpa}
+                                    </td>
+                                    <td className="py-1.5 px-2 text-right">{ay.stats.weightedGpa}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
                           )}
-                        </div>
 
-                        <button
-                          onClick={() => handleDeleteTerm(term.id)}
-                          className="ml-auto text-[10px] font-bold uppercase tracking-wider text-red-500 hover:text-red-700 deleteTermBtn"
-                          style={{ display: terms.length === 1 && termIdx === 0 ? "none" : "block" }}
-                        >
-                          Delete Term
-                        </button>
-                      </div>
+                          {/* Paired Subject Cards: Sem 1 & Sem 2 in 2 Synchronized Columns */}
+                          <div className="course-list flex flex-col gap-4 mb-4">
+                            {ay.pairedCourses.map((pairedItem) => {
+                              const sem1Course = pairedItem.sem1Course;
+                              const sem2Course = pairedItem.sem2Course;
+                              const sem1TermId = pairedItem.sem1TermId || sem1?.id;
+                              const sem2TermId = pairedItem.sem2TermId || sem2?.id;
+
+                              return (
+                                <div
+                                  key={pairedItem.key + pairedItem.courseName}
+                                  className="glass-card rounded-xl p-4 flex flex-col gap-3 animate-fade-in relative z-10"
+                                >
+                                  {/* Subject Header */}
+                                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#1A1A1A]/10">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-bold text-slate-900 text-sm">
+                                        {pairedItem.courseName || "Untitled Course"}
+                                      </span>
+                                      <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                                        {pairedItem.category}
+                                      </span>
+                                      <span className="text-[9px] uppercase font-mono font-bold px-2 py-0.5 rounded bg-amber-100/80 text-amber-900">
+                                        UC: {pairedItem.agCategory}
+                                      </span>
+                                      {(sem1Course?.level || sem2Course?.level) && (
+                                        <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-800">
+                                          {sem1Course?.level || sem2Course?.level}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-center gap-2 ml-auto">
+                                      {sem1Course && sem1TermId && (
+                                        <button
+                                          onClick={() => handleDeleteCourse(sem1TermId, sem1Course.id)}
+                                          className="text-[9px] font-bold text-red-500 hover:text-red-700 uppercase tracking-wider"
+                                          title="Delete from Semester 1"
+                                        >
+                                          Delete S1
+                                        </button>
+                                      )}
+                                      {sem2Course && sem2TermId && (
+                                        <button
+                                          onClick={() => handleDeleteCourse(sem2TermId, sem2Course.id)}
+                                          className="text-[9px] font-bold text-red-500 hover:text-red-700 uppercase tracking-wider"
+                                          title="Delete from Semester 2"
+                                        >
+                                          Delete S2
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Two-Row / Two-Column Semester Entry Box */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {/* Semester 1 Box */}
+                                    <div className="p-3 bg-white/70 border border-[#1A1A1A]/10 rounded-lg flex flex-col justify-between">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="text-[9px] font-bold uppercase tracking-wider text-blue-700 flex items-center gap-1">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                          <span>{sem1?.title || "1st Semester"}</span>
+                                        </span>
+                                        {sem1Course && (
+                                          <span className="text-[8px] font-mono text-slate-400">
+                                            {sem1Course.credit} Credits
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {sem1Course && sem1TermId ? (
+                                        <div className="grid grid-cols-3 gap-2 items-center">
+                                          <div>
+                                            <label className="text-[8px] uppercase tracking-wider font-bold text-slate-400 block mb-0.5">Score (%)</label>
+                                            <input
+                                              type="number"
+                                              className="w-full modern-input rounded text-xs font-bold py-1.5 px-2"
+                                              placeholder="0-100"
+                                              min="0"
+                                              max="100"
+                                              value={sem1Course.score}
+                                              onChange={(e) => handleUpdateCourseField(sem1TermId, sem1Course.id, "score", e.target.value)}
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="text-[8px] uppercase tracking-wider font-bold text-slate-400 block mb-0.5">Credits</label>
+                                            <input
+                                              type="number"
+                                              step="any"
+                                              className="w-full modern-input rounded text-xs font-semibold py-1.5 px-2"
+                                              placeholder="Cr"
+                                              min="0"
+                                              value={sem1Course.credit}
+                                              onChange={(e) => handleUpdateCourseField(sem1TermId, sem1Course.id, "credit", e.target.value)}
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="text-[8px] uppercase tracking-wider font-bold text-slate-400 block mb-0.5">Result</label>
+                                            {(() => {
+                                              if (!sem1Course.score) return <div className="text-slate-400 text-[10px]">—</div>;
+                                              const sc = parseFloat(sem1Course.score);
+                                              const cr = parseFloat(sem1Course.credit) || 0;
+                                              const gp = convertScoreToGradePoint(roundScores ? Math.round(sc) : sc, useLinearGpa);
+                                              const letG = convertScoreToLetterGrade(roundScores ? Math.round(sc) : sc);
+                                              return (
+                                                <div className="text-[10px] font-mono font-bold text-slate-900 bg-slate-50 py-1.5 px-1 rounded border border-slate-200/60 text-center">
+                                                  {letG} ({gp.toFixed(2)}) &bull; {(gp * cr).toFixed(1)} QP
+                                                </div>
+                                              );
+                                            })()}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="py-2 text-center text-slate-400 text-xs italic">
+                                          Not entered in 1st Semester
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* Semester 2 Box */}
+                                    <div className="p-3 bg-white/70 border border-[#1A1A1A]/10 rounded-lg flex flex-col justify-between">
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-700 flex items-center gap-1">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                          <span>{sem2?.title || "2nd Semester"}</span>
+                                        </span>
+                                        {sem2Course && (
+                                          <span className="text-[8px] font-mono text-slate-400">
+                                            {sem2Course.credit} Credits
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {sem2Course && sem2TermId ? (
+                                        <div className="grid grid-cols-3 gap-2 items-center">
+                                          <div>
+                                            <label className="text-[8px] uppercase tracking-wider font-bold text-slate-400 block mb-0.5">Score (%)</label>
+                                            <input
+                                              type="number"
+                                              className="w-full modern-input rounded text-xs font-bold py-1.5 px-2"
+                                              placeholder="0-100"
+                                              min="0"
+                                              max="100"
+                                              value={sem2Course.score}
+                                              onChange={(e) => handleUpdateCourseField(sem2TermId, sem2Course.id, "score", e.target.value)}
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="text-[8px] uppercase tracking-wider font-bold text-slate-400 block mb-0.5">Credits</label>
+                                            <input
+                                              type="number"
+                                              step="any"
+                                              className="w-full modern-input rounded text-xs font-semibold py-1.5 px-2"
+                                              placeholder="Cr"
+                                              min="0"
+                                              value={sem2Course.credit}
+                                              onChange={(e) => handleUpdateCourseField(sem2TermId, sem2Course.id, "credit", e.target.value)}
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="text-[8px] uppercase tracking-wider font-bold text-slate-400 block mb-0.5">Result</label>
+                                            {(() => {
+                                              if (!sem2Course.score) return <div className="text-slate-400 text-[10px]">—</div>;
+                                              const sc = parseFloat(sem2Course.score);
+                                              const cr = parseFloat(sem2Course.credit) || 0;
+                                              const gp = convertScoreToGradePoint(roundScores ? Math.round(sc) : sc, useLinearGpa);
+                                              const letG = convertScoreToLetterGrade(roundScores ? Math.round(sc) : sc);
+                                              return (
+                                                <div className="text-[10px] font-mono font-bold text-slate-900 bg-slate-50 py-1.5 px-1 rounded border border-slate-200/60 text-center">
+                                                  {letG} ({gp.toFixed(2)}) &bull; {(gp * cr).toFixed(1)} QP
+                                                </div>
+                                              );
+                                            })()}
+                                          </div>
+                                        </div>
+                                      ) : sem2TermId && sem1Course ? (
+                                        <button
+                                          onClick={() => handleEnableCourseInPartnerSemester(sem2TermId, sem1Course)}
+                                          className="py-2.5 px-3 border border-dashed border-[#1A1A1A]/20 hover:border-[#1A1A1A]/50 rounded text-[10px] font-bold uppercase tracking-wider text-slate-700 hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5"
+                                        >
+                                          <span className="material-symbols-outlined text-[15px]">add_circle</span>
+                                          <span>+ Enable in {sem2?.title || "2nd Semester"}</span>
+                                        </button>
+                                      ) : (
+                                        <div className="py-2 text-center text-slate-400 text-xs italic">
+                                          2nd Semester not created
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Add Subject to Year Button */}
+                          <button
+                            onClick={() => handleAddSubjectToAcademicYear(ay)}
+                            className="mt-2 mb-6 w-full py-3.5 rounded border border-dashed border-[#1A1A1A]/20 text-[#1A1A1A] hover:bg-[#1A1A1A]/5 hover:border-[#1A1A1A]/40 font-bold uppercase tracking-[0.2em] text-[10px] transition-all flex items-center justify-center gap-2 group focus:outline-none"
+                          >
+                            <span className="material-symbols-outlined text-[16px] group-hover:scale-115 transition-transform">add</span>
+                            <span>+ Add Subject to {ay.yearLabel} (Both Semesters)</span>
+                          </button>
+
+                          <hr className="my-6 border-[#1A1A1A]/10" />
+                        </div>
+                      );
+                    })
+                  ) : (
+                    terms.map((term, termIdx) => {
+                      const ay = academicYears.find((y) => y.terms.some((t) => t.id === term.id));
+                      const termSum = detailedSummary.semesterSummaries.find((s) => s.id === term.id);
+                      const partnerTerm = ay?.terms.find((t) => t.id !== term.id);
+                      const partnerSum = partnerTerm ? detailedSummary.semesterSummaries.find((s) => s.id === partnerTerm.id) : null;
+
+                      return (
+                        <div key={term.id} className="term-block animate-fade-in py-1">
+                          
+                          {/* Term Header Layout */}
+                          <div className="flex flex-wrap items-center gap-3 mb-4 group relative">
+                            <input
+                              type="text"
+                              value={term.title}
+                              onChange={(e) => handleUpdateTermTitle(term.id, e.target.value)}
+                              className="termTitle text-xl font-light italic text-[#1A1A1A] bg-transparent border-0 border-b border-transparent focus:border-[#1A1A1A] focus:ring-0 p-0 transition-all"
+                              style={{ fontFamily: "Georgia, serif" }}
+                            />
+                            <span className="material-symbols-outlined text-slate-400 text-[18px] opacity-0 group-hover:opacity-100 transition-opacity">
+                              edit
+                            </span>
+
+                            {/* Grade Level Selector */}
+                            <div className="flex items-center gap-1.5 ml-1">
+                              <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400">Grade:</label>
+                              <select
+                                value={term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)}
+                                onChange={(e) => handleUpdateTermGradeLevel(term.id, e.target.value as any)}
+                                className="text-[10px] font-bold py-1 px-2 border border-[#1A1A1A]/10 rounded bg-white/80 text-slate-700 cursor-pointer focus:outline-none"
+                              >
+                                <option value="9">Grade 9</option>
+                                <option value="10">Grade 10</option>
+                                <option value="11">Grade 11</option>
+                                <option value="12">Grade 12</option>
+                                <option value="Other">Other</option>
+                              </select>
+
+                              {useUcGpa && ((term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)) === "10" || (term.gradeLevel || inferGradeLevelFromTermTitle(term.title, termIdx)) === "11") && (
+                                <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-300/60 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[11px] text-amber-600">verified</span>
+                                  <span>Counted in UC GPA</span>
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => handleDeleteTerm(term.id)}
+                              className="ml-auto text-[10px] font-bold uppercase tracking-wider text-red-500 hover:text-red-700 deleteTermBtn"
+                              style={{ display: terms.length === 1 && termIdx === 0 ? "none" : "block" }}
+                            >
+                              Delete Term
+                            </button>
+                          </div>
+
+                          {/* 2-Row Semester Summary Banner */}
+                          {summaryDisplayMode === "2row" && (
+                            <div className="mb-4 overflow-x-auto border border-[#1A1A1A]/10 rounded-xl bg-white p-3 shadow-xs">
+                              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
+                                <span className="flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[13px]">view_timeline</span>
+                                  <span>2-Row Semester Summary ({ay?.yearLabel || term.title})</span>
+                                </span>
+                                <span className="text-[8px] font-mono text-slate-400">Comparing Active Term &amp; Partner Semester</span>
+                              </div>
+                              <table className="w-full text-left text-[10px] font-mono">
+                                <thead className="bg-slate-50 text-slate-500 uppercase text-[8px] tracking-wider border-b border-slate-200/60">
+                                  <tr>
+                                    <th className="py-1 px-2 font-bold">Semester</th>
+                                    <th className="py-1 px-1 font-bold text-center">Courses</th>
+                                    <th className="py-1 px-1 font-bold text-center">Credits</th>
+                                    <th className="py-1 px-1 font-bold text-center">Avg %</th>
+                                    <th className="py-1 px-1.5 font-bold text-right text-slate-800">Unwtd</th>
+                                    <th className="py-1 px-2 font-bold text-right">Wtd</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-slate-700">
+                                  {termSum && (
+                                    <tr className="bg-slate-50/70 font-semibold">
+                                      <td className="py-1.5 px-2 font-sans text-slate-900 flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600 inline-block"></span>
+                                        <span>{termSum.title} (Active)</span>
+                                      </td>
+                                      <td className="py-1.5 px-1 text-center">{termSum.courseCount}</td>
+                                      <td className="py-1.5 px-1 text-center font-bold">{termSum.credits}</td>
+                                      <td className="py-1.5 px-1 text-center">{termSum.avgScore}%</td>
+                                      <td className="py-1.5 px-1.5 text-right font-bold text-slate-900" style={{ color: currentAccent.color }}>
+                                        {termSum.unweightedGpa}
+                                      </td>
+                                      <td className="py-1.5 px-2 text-right">{termSum.weightedGpa}</td>
+                                    </tr>
+                                  )}
+                                  {partnerSum ? (
+                                    <tr className="hover:bg-slate-50/50">
+                                      <td className="py-1.5 px-2 font-sans text-slate-600 flex items-center gap-1.5">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>
+                                        <span>{partnerSum.title}</span>
+                                      </td>
+                                      <td className="py-1.5 px-1 text-center">{partnerSum.courseCount}</td>
+                                      <td className="py-1.5 px-1 text-center font-bold">{partnerSum.credits}</td>
+                                      <td className="py-1.5 px-1 text-center">{partnerSum.avgScore}%</td>
+                                      <td className="py-1.5 px-1.5 text-right font-bold text-slate-700">
+                                        {partnerSum.unweightedGpa}
+                                      </td>
+                                      <td className="py-1.5 px-2 text-right">{partnerSum.weightedGpa}</td>
+                                    </tr>
+                                  ) : (
+                                    <tr className="text-slate-400 italic">
+                                      <td className="py-1.5 px-2 font-sans" colSpan={6}>
+                                        Partner semester not configured for this academic year.
+                                      </td>
+                                    </tr>
+                                  )}
+                                  {ay && (
+                                    <tr className="bg-slate-50/90 font-bold border-t border-slate-200 text-slate-900">
+                                      <td className="py-1 px-2 font-sans uppercase text-[8px] tracking-wider">Combined Year Total</td>
+                                      <td className="py-1 px-1 text-center">{ay.stats.coursesCount}</td>
+                                      <td className="py-1 px-1 text-center">{ay.stats.credits}</td>
+                                      <td className="py-1 px-1 text-center">
+                                        {termSum && partnerSum
+                                          ? ((parseFloat(termSum.avgScore) + parseFloat(partnerSum.avgScore)) / 2).toFixed(1) + "%"
+                                          : termSum?.avgScore + "%"}
+                                      </td>
+                                      <td className="py-1 px-1.5 text-right text-slate-950 font-black" style={{ color: currentAccent.color }}>
+                                        {ay.stats.unweightedGpa}
+                                      </td>
+                                      <td className="py-1 px-2 text-right">{ay.stats.weightedGpa}</td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {summaryDisplayMode === "compact" && termSum && (
+                            <div className="mb-3 px-3 py-1.5 bg-slate-50 border border-slate-200/60 rounded-lg flex flex-wrap items-center justify-between text-[10px] font-mono">
+                              <span>Courses: <strong>{termSum.courseCount}</strong></span>
+                              <span>&bull;</span>
+                              <span>Credits: <strong>{termSum.credits}</strong></span>
+                              <span>&bull;</span>
+                              <span>Score Avg: <strong>{termSum.avgScore}%</strong></span>
+                              <span>&bull;</span>
+                              <span>Unwtd GPA: <strong style={{ color: currentAccent.color }}>{termSum.unweightedGpa}</strong></span>
+                              <span>&bull;</span>
+                              <span>Wtd GPA: <strong>{termSum.weightedGpa}</strong></span>
+                            </div>
+                          )}
 
                       {/* Course Card Grid Container */}
                       <div className="course-list flex flex-col gap-4 mb-4">
@@ -2902,7 +3885,7 @@ export default function Home() {
                                 />
                               </div>
 
-                              {/* 5. Credit hours entry */}
+                              {/* 5. Credit hours entry (step="any") */}
                               <div className="w-full md:w-[11%]">
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">Credits</label>
                                 <input
@@ -2910,34 +3893,82 @@ export default function Home() {
                                   className="courseCredit w-full modern-input rounded-lg text-xs font-semibold text-slate-700 py-2.5 px-3 focus:outline-none focus:border-[#1A1A1A] focus:ring-0"
                                   placeholder="Cr"
                                   min="0"
-                                  step="0.5"
+                                  step="any"
                                   value={course.credit}
                                   onChange={(e) => handleUpdateCourseField(term.id, course.id, "credit", e.target.value)}
                                 />
                               </div>
 
-                              {/* 6. Dynamic Calculated Grade Badge */}
-                              <div className={`w-full ${useUcGpa ? "md:w-[14%]" : "md:w-[15%]"}`}>
+                              {/* 6. Dynamic Calculated Grade & Points Badge */}
+                              <div className={`w-full ${useUcGpa ? "md:w-[15%]" : "md:w-[16%]"}`}>
                                 <label className="text-[9px] uppercase tracking-wider font-bold text-slate-400 ml-1 mb-1 block">
-                                  {useUcGpa ? "UC Grade Pts" : "Result Grade"}
+                                  {useUcGpa ? "UC Grade Pts" : "Grade & Points"}
                                 </label>
-                                <div className="bg-[#1A1A1A]/5 border border-[#1A1A1A]/5 rounded-lg py-2.5 px-3 text-xs font-bold text-center w-full" style={{ color: currentAccent.color }}>
-                                  {course.score ? (() => {
-                                    const parsedVal = parseFloat(course.score);
-                                    const displayVal = roundScores ? Math.round(parsedVal) : parsedVal;
-                                    if (useUcGpa) {
-                                      const agCat = course.agCategory || detectAgCategoryFromName(course.courseName);
-                                      if (agCat === "Non-AG") {
-                                        return "Excluded (PE)";
-                                      }
-                                      const baseUcPoint = scoreToUcGradePoint(displayVal);
-                                      const isHonors = (course.level === "AP/IB" || course.level === "Honors") && baseUcPoint >= 2.0;
-                                      const totalPoint = baseUcPoint + (isHonors ? 1.0 : 0.0);
-                                      return `${scoreToUcLetterGrade(displayVal)} (${totalPoint.toFixed(1)}${isHonors ? ' ✦' : ''})`;
+                                {course.score ? (() => {
+                                  const parsedVal = parseFloat(course.score);
+                                  if (isNaN(parsedVal)) {
+                                    return (
+                                      <div className="bg-slate-100 rounded-lg py-2 px-2 text-[10px] text-center text-slate-400">
+                                        —
+                                      </div>
+                                    );
+                                  }
+                                  const displayVal = roundScores ? Math.round(parsedVal) : parsedVal;
+                                  const cr = parseFloat(course.credit) || 0;
+
+                                  if (useUcGpa) {
+                                    const agCat = course.agCategory || detectAgCategoryFromName(course.courseName);
+                                    if (agCat === "Non-AG") {
+                                      return (
+                                        <div className="bg-slate-100 rounded-lg py-1.5 px-2 text-[10px] text-center text-slate-500 font-mono">
+                                          <span className="block font-bold">Non-A-G</span>
+                                          <span className="text-[8px] text-slate-400">Excluded (PE)</span>
+                                        </div>
+                                      );
                                     }
-                                    return `${convertScoreToLetterGrade(displayVal)} (${convertScoreToGradePoint(displayVal, useLinearGpa).toFixed(2)})`;
-                                  })() : "—"}
-                                </div>
+                                    const baseUcPoint = scoreToUcGradePoint(displayVal);
+                                    const isHonors = (course.level === "AP/IB" || course.level === "Honors") && baseUcPoint >= 2.0;
+                                    const totalPoint = baseUcPoint + (isHonors ? 1.0 : 0.0);
+                                    return (
+                                      <div className="bg-amber-50/80 border border-amber-200/80 rounded-lg py-1 px-2 text-[10px] text-center font-mono text-amber-950">
+                                        <div className="flex items-center justify-between font-bold">
+                                          <span>{scoreToUcLetterGrade(displayVal)}</span>
+                                          <span>{totalPoint.toFixed(1)} UC{isHonors ? " ✦" : ""}</span>
+                                        </div>
+                                        <div className="text-[8px] text-amber-800/80 flex justify-between border-t border-amber-200/50 mt-0.5 pt-0.5">
+                                          <span>Base: {baseUcPoint}</span>
+                                          <span>{isHonors ? "Honors +1" : "Standard"}</span>
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+
+                                  const letter = convertScoreToLetterGrade(displayVal);
+                                  const unwtdGp = convertScoreToGradePoint(displayVal, useLinearGpa);
+                                  let boost = 0;
+                                  if (course.level === "Honors") boost = 0.5;
+                                  else if (course.level === "AP/IB") boost = 1.0;
+                                  else if (course.level === "Custom" && course.weightBoost) boost = parseFloat(course.weightBoost) || 0;
+                                  const wtdGp = unwtdGp + boost;
+                                  const qp = (unwtdGp * cr).toFixed(2);
+
+                                  return (
+                                    <div className="bg-white border border-[#1A1A1A]/10 rounded-lg py-1 px-2 text-[10px] font-mono text-slate-800 shadow-xs">
+                                      <div className="flex items-center justify-between font-bold">
+                                        <span className="text-xs font-sans text-slate-900">{letter}</span>
+                                        <span style={{ color: currentAccent.color }}>{unwtdGp.toFixed(2)} GP</span>
+                                      </div>
+                                      <div className="text-[8px] text-slate-500 flex items-center justify-between border-t border-slate-100 mt-0.5 pt-0.5">
+                                        <span>Wtd: {wtdGp.toFixed(2)}</span>
+                                        <span>QP: {qp}</span>
+                                      </div>
+                                    </div>
+                                  );
+                                })() : (
+                                  <div className="bg-slate-50 border border-slate-200/60 rounded-lg py-2 px-2 text-[10px] text-center text-slate-400 italic">
+                                    —
+                                  </div>
+                                )}
                               </div>
 
                               {/* 7. Delete Row button */}
@@ -3045,7 +4076,9 @@ export default function Home() {
 
                       <hr className="my-8 border-[#1A1A1A]/10" />
                     </div>
-                  ))}
+                  );
+                })
+              )}
                 </div>
 
                 {/* ADD SEMESTER BUTTON */}

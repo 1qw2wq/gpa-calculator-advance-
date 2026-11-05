@@ -69,6 +69,12 @@ CRITICAL REQUIREMENT - DETECT ALL SEMESTERS / TERMS ACROSS MULTIPLE YEARS:
    - For example: if the transcript shows "0.5" or ".50", set "credit": "0.5". If it shows "5.0" or "5", set "credit": "5.0". If it shows "0.25", set "credit": "0.25". If it shows "3.0" or "4.0", set "credit": "3.0" or "4.0".
    - If both Attempted and Earned columns exist, use Earned credits (or Attempted if in-progress).
    - DO NOT default courses to "1.0" if the transcript displays credit values! Only use "1.0" as a fallback if credit is completely absent from the document.
+   - CAUTION - DO NOT CONFUSE "GRADE POINT" COLUMN WITH "CREDIT / CREDIT PERIOD" COLUMN:
+     - When transcripts have columns like "[Grade / %] [Grade Point] [Credit Period]":
+     - The column labeled "Grade Point" (e.g. 4.0, 3.67, 3.33, 3, 2.67) is the grade point, NOT the credit!
+     - The column labeled "Credit Period" or "Credit" (e.g. 4, 5, 2, 1) is the course credit!
+     - Example: If a row says "Chinese | 84% | 3 | 1", then score="84", letterGrade="B", and credit="1.0" (the credit period is 1, NOT 3!).
+     - Example: If a row says "Math | 90% | 3.67 | 1", then score="90", letterGrade="A-", and credit="1.0" (the credit period is 1, NOT 3!).
 6. For each semester in "terms":
    - "termTitle": Distinct descriptive name, e.g. "Grade 9 - Fall 2022" or "Grade 9 Semester 1" or "Grade 10 Semester 1" or "Fall 2023"
    - "gradeLevel": "9" | "10" | "11" | "12" | "Other" (determine based on school year or sequence: year 1 = 9, year 2 = 10, year 3 = 11, year 4 = 12)
