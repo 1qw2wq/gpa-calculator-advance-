@@ -175,7 +175,12 @@ interface ScrapedCourse {
   agCategory?: AgCategory;
 }
 
-const cleanAndMapCourse = (rawName: string, rawScore: string, roundScores: boolean = true): Omit<ScrapedCourse, "id"> => {
+const cleanAndMapCourse = (
+  rawName: string,
+  rawScore: string,
+  roundScores: boolean = true,
+  rawCredit?: string
+): Omit<ScrapedCourse, "id"> => {
   const originalName = rawName.trim();
   let cleanedName = originalName;
 
@@ -315,13 +320,18 @@ const cleanAndMapCourse = (rawName: string, rawScore: string, roundScores: boole
     }
   }
 
+  let credit = "1.0";
+  if (rawCredit !== undefined && rawCredit !== null && String(rawCredit).trim() !== "") {
+    credit = String(rawCredit).trim();
+  }
+
   return {
     className: mappedName,
     originalName,
     score,
     category,
     level,
-    credit: "1.0",
+    credit,
     agCategory: detectAgCategoryFromName(mappedName)
   };
 };
@@ -543,9 +553,10 @@ export default function Home() {
       parsed.forEach((item, index) => {
         const rawName = item.Class || item.class || item.Course || item.course || item["Class Name"] || "";
         const rawScore = item["Overall Mark (Score)"] || item["Overall Mark"] || item.Score || item.score || item.Grade || item.grade || "";
+        const rawCredit = item.Credit || item.credit || item.Credits || item.credits || item.Units || item.units || item.CR || item.cr || item.Hrs || item.hrs;
 
         if (rawName && typeof rawName === "string") {
-          const cleanCourse = cleanAndMapCourse(rawName, String(rawScore), activeRounding);
+          const cleanCourse = cleanAndMapCourse(rawName, String(rawScore), activeRounding, rawCredit ? String(rawCredit) : undefined);
           const courseId = generateUniqueId(`scraped-${index}`);
           const finalItem = {
             ...cleanCourse,
@@ -1495,6 +1506,11 @@ export default function Home() {
       const rawCourses = extracted.extractedCourses || [];
       rawCourses.forEach((c: any, index: number) => {
         const courseId = generateUniqueId(`ai-course-${index}`);
+        const rawCredit = c.credit ?? c.credits ?? c.creditEarned ?? c.earnedCredit ?? c.creditAttempted ?? c.attemptedCredit ?? c.units ?? c.unit ?? c.hrs ?? c.hours ?? c.cr ?? c.weight;
+        const finalCredit = (rawCredit !== undefined && rawCredit !== null && String(rawCredit).trim() !== "")
+          ? String(rawCredit).trim()
+          : "1.0";
+
         const parsedItem = {
           id: courseId,
           className: c.courseName || c.originalName || "Unnamed Course",
@@ -1502,7 +1518,7 @@ export default function Home() {
           score: String(c.score || "95"),
           category: c.category || "Core Subjects",
           level: (c.level as any) || (c.courseName?.toLowerCase().includes("ap") ? "AP/IB" : c.courseName?.toLowerCase().includes("honors") ? "Honors" : "Regular"),
-          credit: String(c.credit || "1.0"),
+          credit: finalCredit,
           agCategory: (c.agCategory as AgCategory) || detectAgCategoryFromName(c.courseName || ""),
           termTitle: c.termTitle || "Semester 1",
           gradeLevel: c.gradeLevel || "10"
@@ -3418,7 +3434,8 @@ export default function Home() {
                                             <label className="text-[8px] font-bold text-slate-400 uppercase block mb-0.5">Credits</label>
                                             <input
                                               type="number"
-                                              step="0.5"
+                                              step="any"
+                                              min="0"
                                               value={course.credit}
                                               onChange={(e) => {
                                                 const val = e.target.value;

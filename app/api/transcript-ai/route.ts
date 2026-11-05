@@ -60,9 +60,16 @@ CRITICAL REQUIREMENT - DETECT ALL SEMESTERS / TERMS ACROSS MULTIPLE YEARS:
 3. DO NOT lump courses from multiple semesters into a single term! Each semester must be its own distinct entry in the "terms" array in chronological order.
 4. IMPORTANT - HANDLING COLUMNAR / MULTI-TERM TRANSCRIPTS:
    - Many transcripts list courses with columns for multiple terms on one row (e.g., Course Name | Sem 1 / S1 Grade | Sem 2 / S2 Grade).
-   - If a course has separate S1 and S2 grades, you MUST split them into two entries: place the Semester 1 grade under the Semester 1 term (credit: typically 0.5), and the Semester 2 grade under the Semester 2 term (credit: typically 0.5).
+   - If a course has separate S1 and S2 grades, you MUST split them into two entries: place the Semester 1 grade under the Semester 1 term (with its semester credit), and the Semester 2 grade under the Semester 2 term (with its semester credit).
    - NEVER drop Semester 2 or merge them into one semester!
-5. For each semester in "terms":
+5. CRITICAL - EXTRACT EXACT COURSE CREDITS / UNITS:
+   - Transcripts almost always feature a column for credits or units (labeled: "Credit", "Credits", "Cred", "CR", "Att", "Earn", "Units", "Hrs", "Weight", "Attempted", "Earned", "Sem Credit").
+   - You MUST inspect the document for this column and extract the EXACT numeric credit value printed for each course!
+   - Many high school transcripts award 0.5 credits (or 5.0 credits) per semester. Colleges award 3.0 or 4.0 credits.
+   - For example: if the transcript shows "0.5" or ".50", set "credit": "0.5". If it shows "5.0" or "5", set "credit": "5.0". If it shows "0.25", set "credit": "0.25". If it shows "3.0" or "4.0", set "credit": "3.0" or "4.0".
+   - If both Attempted and Earned columns exist, use Earned credits (or Attempted if in-progress).
+   - DO NOT default courses to "1.0" if the transcript displays credit values! Only use "1.0" as a fallback if credit is completely absent from the document.
+6. For each semester in "terms":
    - "termTitle": Distinct descriptive name, e.g. "Grade 9 - Fall 2022" or "Grade 9 Semester 1" or "Grade 10 Semester 1" or "Fall 2023"
    - "gradeLevel": "9" | "10" | "11" | "12" | "Other" (determine based on school year or sequence: year 1 = 9, year 2 = 10, year 3 = 11, year 4 = 12)
    - "courses": Array of all courses taken specifically during that semester.
@@ -77,7 +84,7 @@ For each course:
    - D -> "65", F -> "50"
    - If 1-7 IB scale: 7 -> "98", 6 -> "93", 5 -> "85", 4 -> "75", 3 -> "65", 2 -> "50"
 4. "letterGrade": The explicit or mapped letter grade ("A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F").
-5. "credit": Credit hours (e.g. "1.0" or "0.5"). Default to "1.0" if unspecified.
+5. "credit": The EXACT numeric credit hours/units printed on the transcript (e.g. "0.5", "5.0", "0.25", "3.0", "1.0"). Extract the actual number printed. DO NOT default to "1.0" when credits are specified!
 6. "category": Best match among: ["Core Subjects", "Languages", "Arts", "Business & Technology", "Physical Education", "Other Electives", "Chinese Specific"].
 7. "level": One of ["Regular", "Honors", "AP/IB", "Custom"]. Mark as "AP/IB" if it is an AP or IB course. Mark as "Honors" if marked as Honors or H.
 8. "weightBoost": "1.0" for AP/IB, "0.5" for Honors, "0.0" for Regular.
@@ -126,11 +133,13 @@ You MUST output ONLY valid JSON matching this schema:
         }
       });
       contents.push({
-        text: text ? `Additional transcript notes:\n${text}\n\nPlease extract all academic courses.` : "Please extract and structure all academic courses from this transcript file."
+        text: text
+          ? `Additional transcript notes:\n${text}\n\nPlease extract all academic courses across all semesters. Be sure to extract the exact credit/unit hours printed on the transcript for each course (do not default to 1.0 if credits such as 0.5, 5.0, 3.0, etc. are listed).`
+          : "Please extract and structure all academic courses from this transcript file across all semesters. Be sure to extract the exact credit/unit hours printed on the transcript for each course (do not default to 1.0 if credits such as 0.5, 5.0, 3.0, etc. are listed)."
       });
     } else {
       contents.push({
-        text: `Here is the transcript text:\n\n${text}\n\nPlease extract and structure all academic courses.`
+        text: `Here is the transcript text:\n\n${text}\n\nPlease extract and structure all academic courses across all semesters. Be sure to extract the exact credit/unit hours printed on the transcript for each course (do not default to 1.0 if credits such as 0.5, 5.0, 3.0, etc. are listed).`
       });
     }
 
@@ -192,6 +201,12 @@ You MUST output ONLY valid JSON matching this schema:
       if (Array.isArray(rawList) && rawList.length > 0) {
         const termMap: Record<string, any> = {};
         rawList.forEach((c: any) => {
+          const rawCredit = c.credit ?? c.credits ?? c.creditEarned ?? c.earnedCredit ?? c.creditAttempted ?? c.attemptedCredit ?? c.units ?? c.unit ?? c.hrs ?? c.hours ?? c.cr ?? c.weight;
+          if (rawCredit !== undefined && rawCredit !== null && String(rawCredit).trim() !== "") {
+            c.credit = String(rawCredit).trim();
+          } else {
+            c.credit = "1.0";
+          }
           const tTitle = c.termTitle || c.semester || c.term || "Semester 1";
           if (!termMap[tTitle]) {
             termMap[tTitle] = {
@@ -206,7 +221,7 @@ You MUST output ONLY valid JSON matching this schema:
       }
     }
 
-    // Ensure every course inside every term carries its termTitle and gradeLevel
+    // Ensure every course inside every term carries its termTitle and gradeLevel, and normalized credit
     const flatList: any[] = [];
     terms.forEach((t: any, termIdx: number) => {
       if (!t.termTitle) {
@@ -217,6 +232,12 @@ You MUST output ONLY valid JSON matching this schema:
       }
       if (Array.isArray(t.courses)) {
         t.courses.forEach((c: any) => {
+          const rawCredit = c.credit ?? c.credits ?? c.creditEarned ?? c.earnedCredit ?? c.creditAttempted ?? c.attemptedCredit ?? c.units ?? c.unit ?? c.hrs ?? c.hours ?? c.cr ?? c.weight;
+          if (rawCredit !== undefined && rawCredit !== null && String(rawCredit).trim() !== "") {
+            c.credit = String(rawCredit).trim();
+          } else {
+            c.credit = "1.0";
+          }
           c.termTitle = t.termTitle;
           c.gradeLevel = t.gradeLevel;
           flatList.push(c);
