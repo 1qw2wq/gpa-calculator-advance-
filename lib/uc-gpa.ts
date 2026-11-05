@@ -55,7 +55,7 @@ export interface AgProgressItem {
 }
 
 export interface UcGpaSummary {
-  // Official 10th-11th grade GPAs
+  // Official 10th-11th grade GPAs (Image 1 Formulas: Base Points / Total Courses)
   cappedWeightedGpa: string;
   fullyWeightedGpa: string;
   unweightedGpa: string;
@@ -64,6 +64,12 @@ export interface UcGpaSummary {
   cumulativeCappedGpa: string;
   cumulativeWeightedGpa: string;
   cumulativeUnweightedGpa: string;
+
+  // Exact Formula Variables (from UC guidelines: Base Points / Total Courses)
+  tenthEleventhBasePoints: number;
+  tenthEleventhCoursesCount: number;
+  cumulativeBasePoints: number;
+  cumulativeCoursesCount: number;
 
   // Credits & Honors Points Accounting
   tenthEleventhCredits: number;
@@ -79,6 +85,17 @@ export interface UcGpaSummary {
   // A-G Progress
   agProgress: AgProgressItem[];
   allAgRequirementsMet: boolean;
+}
+
+/**
+ * Truncates a GPA value to two decimal places without rounding per official UC policy.
+ * (e.g. 200 / 52 = 3.84615... -> 3.84, NOT 3.85)
+ */
+export function truncateToTwoDecimals(val: number): string {
+  if (isNaN(val) || val <= 0) return "0.00";
+  // Add a small epsilon (1e-9) to avoid floating-point inaccuracies like 3.84 * 100 = 383.99999999999994
+  const truncated = Math.floor((val + 1e-9) * 100) / 100;
+  return truncated.toFixed(2);
 }
 
 /**
@@ -292,8 +309,9 @@ export function detectAgCategoryFromName(courseName: string): AgCategory {
  * Calculates University of California (UC) GPA metrics
  */
 export function calculateUcGpa(terms: UcTermInput[]): UcGpaSummary {
-  // 10th & 11th Grade Accounting
-  let points1011Unweighted = 0;
+  // 10th & 11th Grade Accounting (Image 1 Formulas: Base Points / Total Courses)
+  let points1011Base = 0;
+  let courses1011Count = 0;
   let credits1011 = 0;
 
   let tenthGradeHonorsPoints = 0;
@@ -301,7 +319,8 @@ export function calculateUcGpa(terms: UcTermInput[]): UcGpaSummary {
   let tenthEleventhUncappedHonorsPoints = 0;
 
   // Cumulative (9-12) Accounting
-  let cumulativeUnweightedPoints = 0;
+  let cumulativeBasePoints = 0;
+  let cumulativeCoursesCount = 0;
   let cumulativeCredits = 0;
   let cumulativeHonorsPoints = 0;
 
@@ -325,76 +344,86 @@ export function calculateUcGpa(terms: UcTermInput[]): UcGpaSummary {
 
     term.courses.forEach((course) => {
       const credit = parseFloat(course.credit);
-      if (isNaN(credit) || credit <= 0) return;
+      const validCredit = (!isNaN(credit) && credit > 0) ? credit : 1.0;
 
       const agCategory = course.agCategory || detectAgCategoryFromName(course.courseName);
 
-      // Track non-A-G credits separately
+      // Track non-A-G credits separately (PE, Health, TA, etc. excluded per UC guidelines)
       if (agCategory === "Non-AG") {
-        totalNonAgCredits += credit;
-        agCreditsMap["Non-AG"] += credit;
-        return; // Excluded from all UC GPA calculations
+        totalNonAgCredits += validCredit;
+        agCreditsMap["Non-AG"] += validCredit;
+        return;
       }
 
       // Track A-G subject completion across high school
-      agCreditsMap[agCategory] = (agCreditsMap[agCategory] || 0) + credit;
+      agCreditsMap[agCategory] = (agCreditsMap[agCategory] || 0) + validCredit;
 
       const basePoint = scoreToUcGradePoint(course.score);
       const isPassForHonors = basePoint >= 2.0; // Must be C or better (A, B, C)
       const isHonorsCourse = course.level === "AP/IB" || course.level === "Honors";
 
       // Cumulative (9-12)
-      cumulativeUnweightedPoints += basePoint * credit;
-      cumulativeCredits += credit;
+      cumulativeBasePoints += basePoint;
+      cumulativeCoursesCount += 1;
+      cumulativeCredits += validCredit;
 
       if (isHonorsCourse && isPassForHonors) {
-        cumulativeHonorsPoints += 1.0 * credit;
+        cumulativeHonorsPoints += 1;
       }
 
-      // 10th & 11th Grade UC Focus Window
+      // 10th & 11th Grade UC Focus Window (Image 1 Primary Baseline)
       if (isTenthOrEleventh) {
-        points1011Unweighted += basePoint * credit;
-        credits1011 += credit;
+        points1011Base += basePoint;
+        courses1011Count += 1;
+        credits1011 += validCredit;
 
         if (isHonorsCourse && isPassForHonors) {
-          tenthEleventhUncappedHonorsPoints += 1.0 * credit;
+          tenthEleventhUncappedHonorsPoints += 1;
           if (gradeLevel === "10") {
-            tenthGradeHonorsPoints += 1.0 * credit;
+            tenthGradeHonorsPoints += 1;
           } else if (gradeLevel === "11") {
-            eleventhGradeHonorsPoints += 1.0 * credit;
+            eleventhGradeHonorsPoints += 1;
           }
         }
       }
     });
   });
 
-  // Calculate Capped Honors Points:
-  // - Max 4 semester points from 10th grade
-  // - Max 8 semester points combined total
-  const cappedTenthHonors = Math.min(4.0, tenthGradeHonorsPoints);
-  const remainingAllowance = Math.max(0, 8.0 - cappedTenthHonors);
+  // Calculate Capped Honors Points per UC policy (Image 1):
+  // - Maximum of 8 semester points
+  // - No more than 4 semester points from 10th grade
+  const cappedTenthHonors = Math.min(4, tenthGradeHonorsPoints);
+  const remainingAllowance = Math.max(0, 8 - cappedTenthHonors);
   const cappedEleventhHonors = Math.min(remainingAllowance, eleventhGradeHonorsPoints);
   const totalCappedHonors = cappedTenthHonors + cappedEleventhHonors;
 
-  // 10th-11th Official GPAs
-  const cappedWeightedGpa = credits1011 > 0 ? (points1011Unweighted + totalCappedHonors) / credits1011 : 0;
-  const fullyWeightedGpa = credits1011 > 0 ? (points1011Unweighted + tenthEleventhUncappedHonorsPoints) / credits1011 : 0;
-  const unweightedGpa = credits1011 > 0 ? points1011Unweighted / credits1011 : 0;
+  // 10th-11th Official GPAs (Image 1 Formulas)
+  // UC Unweighted = Total Base Points / Total Courses
+  const unweightedGpaRaw = courses1011Count > 0 ? points1011Base / courses1011Count : 0;
+  // UC Capped GPA = (Base Points + Capped Honors Points) / Total Courses
+  const cappedWeightedGpaRaw = courses1011Count > 0 ? (points1011Base + totalCappedHonors) / courses1011Count : 0;
+  // UC Fully Weighted GPA = (Base Points + Honors Points) / Total Courses
+  const fullyWeightedGpaRaw = courses1011Count > 0 ? (points1011Base + tenthEleventhUncappedHonorsPoints) / courses1011Count : 0;
+
+  // Truncates to two decimals without rounding per UC rules (e.g. 200 / 52 = 3.84)
+  const unweightedGpa = truncateToTwoDecimals(unweightedGpaRaw);
+  const cappedWeightedGpa = truncateToTwoDecimals(cappedWeightedGpaRaw);
+  const fullyWeightedGpa = truncateToTwoDecimals(fullyWeightedGpaRaw);
 
   // Cumulative GPAs (9-12)
-  const cumulativeCappedGpa = cumulativeCredits > 0 ? (cumulativeUnweightedPoints + Math.min(8.0, cumulativeHonorsPoints)) / cumulativeCredits : 0;
-  const cumulativeWeightedGpa = cumulativeCredits > 0 ? (cumulativeUnweightedPoints + cumulativeHonorsPoints) / cumulativeCredits : 0;
-  const cumulativeUnweightedGpa = cumulativeCredits > 0 ? cumulativeUnweightedPoints / cumulativeCredits : 0;
+  const cumulativeUnweightedGpaRaw = cumulativeCoursesCount > 0 ? cumulativeBasePoints / cumulativeCoursesCount : 0;
+  const cumulativeCappedGpaRaw = cumulativeCoursesCount > 0 ? (cumulativeBasePoints + Math.min(8, cumulativeHonorsPoints)) / cumulativeCoursesCount : 0;
+  const cumulativeWeightedGpaRaw = cumulativeCoursesCount > 0 ? (cumulativeBasePoints + cumulativeHonorsPoints) / cumulativeCoursesCount : 0;
+
+  const cumulativeUnweightedGpa = truncateToTwoDecimals(cumulativeUnweightedGpaRaw);
+  const cumulativeCappedGpa = truncateToTwoDecimals(cumulativeCappedGpaRaw);
+  const cumulativeWeightedGpa = truncateToTwoDecimals(cumulativeWeightedGpaRaw);
 
   // Build A-G Progress Summary
-  // Standard California high school: 1 year = 2 credits (or 2 semesters).
-  // If user enters 1 credit per year, we adapt accordingly.
   const agProgress: AgProgressItem[] = (["A", "B", "C", "D", "E", "F", "G"] as AgCategory[]).map(code => {
     const info = AG_CATEGORIES[code];
     const completed = agCreditsMap[code] || 0;
-    // Assuming 1 semester = 0.5 year = 1 credit or 0.5 credit. We test against required semesters.
-    // If credit is entered as 1.0 per semester or 0.5 per semester, info.requiredYears is key.
-    const required = info.requiredYears; // In years
+    const required = info.requiredYears;
     return {
       code,
       name: info.name,
@@ -407,13 +436,18 @@ export function calculateUcGpa(terms: UcTermInput[]): UcGpaSummary {
   const allAgRequirementsMet = agProgress.every(p => p.isSatisfied);
 
   return {
-    cappedWeightedGpa: cappedWeightedGpa.toFixed(2),
-    fullyWeightedGpa: fullyWeightedGpa.toFixed(2),
-    unweightedGpa: unweightedGpa.toFixed(2),
+    cappedWeightedGpa,
+    fullyWeightedGpa,
+    unweightedGpa,
     
-    cumulativeCappedGpa: cumulativeCappedGpa.toFixed(2),
-    cumulativeWeightedGpa: cumulativeWeightedGpa.toFixed(2),
-    cumulativeUnweightedGpa: cumulativeUnweightedGpa.toFixed(2),
+    cumulativeCappedGpa,
+    cumulativeWeightedGpa,
+    cumulativeUnweightedGpa,
+
+    tenthEleventhBasePoints: points1011Base,
+    tenthEleventhCoursesCount: courses1011Count,
+    cumulativeBasePoints,
+    cumulativeCoursesCount,
 
     tenthEleventhCredits: credits1011,
     totalAgCredits: cumulativeCredits,
@@ -423,7 +457,7 @@ export function calculateUcGpa(terms: UcTermInput[]): UcGpaSummary {
     honorsPointsPotential: tenthEleventhUncappedHonorsPoints,
     honorsTenthGradeApplied: cappedTenthHonors,
     honorsEleventhGradeApplied: cappedEleventhHonors,
-    maxHonorsAllowed: 8.0,
+    maxHonorsAllowed: 8,
 
     agProgress,
     allAgRequirementsMet

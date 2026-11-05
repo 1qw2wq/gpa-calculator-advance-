@@ -112,7 +112,7 @@ const findCategoryForCourseName = (name: string): string | null => {
   return matched ? matched.category : null;
 };
 
-const convertScoreToGradePoint = (score: number, useLinear: boolean = true): number => {
+const convertScoreToGradePoint = (score: number, useLinear: boolean = false): number => {
   if (isNaN(score) || score < 0) return 0.0;
   if (score < 65) return 0.0;
   
@@ -372,7 +372,7 @@ export default function Home() {
   const [manageBacImportMode, setManageBacImportMode] = useState<"append" | "replace">("append");
   const [scriptCopied, setScriptCopied] = useState<boolean>(false);
   const [roundScores, setRoundScores] = useState<boolean>(true);
-  const [useLinearGpa, setUseLinearGpa] = useState<boolean>(true);
+  const [useLinearGpa, setUseLinearGpa] = useState<boolean>(false);
 
   // University of California (UC) Admissions Mode & Settings
   const [useUcGpa, setUseUcGpa] = useState<boolean>(false);
@@ -717,9 +717,11 @@ export default function Home() {
         setRoundScores(storedRoundScores === "true");
       }
 
-      const storedUseLinearGpa = localStorage.getItem("gpaTracker_useLinearGpa");
+      const storedUseLinearGpa = localStorage.getItem("gpaTracker_useLinearGpa_v2");
       if (storedUseLinearGpa !== null) {
         setUseLinearGpa(storedUseLinearGpa === "true");
+      } else {
+        setUseLinearGpa(false);
       }
 
       const storedUseUcGpa = localStorage.getItem("gpaTracker_useUcGpa");
@@ -779,7 +781,7 @@ export default function Home() {
 
   const syncUseLinearGpa = (val: boolean) => {
     setUseLinearGpa(val);
-    localStorage.setItem("gpaTracker_useLinearGpa", String(val));
+    localStorage.setItem("gpaTracker_useLinearGpa_v2", String(val));
   };
 
   const syncUseUcGpa = (val: boolean) => {
@@ -2108,29 +2110,47 @@ export default function Home() {
                         <span>Unweighted: <strong className="text-slate-800">{ucTotals.unweightedGpa}</strong></span>
                       </div>
 
-                      {/* UC Stats Grid */}
-                      <div className="grid grid-cols-2 gap-4 w-full mt-6">
-                        <div className="bg-white border border-[#1A1A1A]/10 p-3.5 rounded flex flex-col items-center gap-1">
-                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">10th-11th A-G Credits</span>
-                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>{ucTotals.tenthEleventhCredits}</span>
+                      {/* UC Stats Grid matching Image 1: Base Points, Total Courses, Honors Points */}
+                      <div className="grid grid-cols-3 gap-2.5 w-full mt-6">
+                        <div className="bg-white border border-[#1A1A1A]/10 p-3 rounded flex flex-col items-center gap-0.5">
+                          <span className="text-slate-500 text-[8.5px] uppercase tracking-wider font-bold">Total Base Points</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>
+                            {ucTotals.tenthEleventhBasePoints}
+                          </span>
+                          <span className="text-[7.5px] text-slate-400">A=4, B=3, C=2...</span>
                         </div>
-                        <div className="bg-white border border-[#1A1A1A]/10 p-3.5 rounded flex flex-col items-center gap-1">
-                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Honors Cap Used</span>
-                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{ucTotals.honorsPointsApplied} / 8</span>
+                        <div className="bg-white border border-[#1A1A1A]/10 p-3 rounded flex flex-col items-center gap-0.5">
+                          <span className="text-slate-500 text-[8.5px] uppercase tracking-wider font-bold">Total Courses</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                            {ucTotals.tenthEleventhCoursesCount}
+                          </span>
+                          <span className="text-[7.5px] text-slate-400">10th &amp; 11th A-G</span>
+                        </div>
+                        <div className="bg-white border border-[#1A1A1A]/10 p-3 rounded flex flex-col items-center gap-0.5">
+                          <span className="text-slate-500 text-[8.5px] uppercase tracking-wider font-bold">Capped Honors</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
+                            {ucTotals.honorsPointsApplied} / 8
+                          </span>
+                          <span className="text-[7.5px] text-slate-400">{ucTotals.honorsPointsPotential} uncapped</span>
                         </div>
                       </div>
 
-                      <div className="w-full mt-3 p-2 bg-slate-50 border border-slate-200/60 rounded text-[9.5px] text-slate-600 text-left space-y-1">
-                        <div className="flex justify-between">
-                          <span>10th Grade Honors Bonus:</span>
-                          <strong>{ucTotals.honorsTenthGradeApplied} / 4 max</strong>
+                      {/* Formula Step-by-Step Breakdown (Image 1) */}
+                      <div className="w-full mt-3 p-2.5 bg-amber-50/70 border border-amber-200/70 rounded-lg text-left space-y-1.5 font-mono text-[10px]">
+                        <div className="flex justify-between items-center text-amber-950 font-bold border-b border-amber-200/60 pb-1">
+                          <span className="font-sans text-[9px] uppercase tracking-wider">UC Capped GPA Formula:</span>
+                          <span>({ucTotals.tenthEleventhBasePoints} + {ucTotals.honorsPointsApplied}) ÷ {ucTotals.tenthEleventhCoursesCount || 1} = {ucTotals.cappedWeightedGpa}</span>
                         </div>
-                        <div className="flex justify-between">
-                          <span>11th Grade Honors Bonus:</span>
-                          <strong>{ucTotals.honorsEleventhGradeApplied} / 4 max</strong>
+                        <div className="flex justify-between text-slate-700 text-[9.5px]">
+                          <span className="font-sans">UC Unweighted Formula:</span>
+                          <span>{ucTotals.tenthEleventhBasePoints} ÷ {ucTotals.tenthEleventhCoursesCount || 1} = <strong>{ucTotals.unweightedGpa}</strong></span>
                         </div>
-                        <div className="text-[9px] text-slate-400 pt-1 border-t border-slate-200">
-                          Flat 4.0 scale (A=4, B=3, C=2, D=1, F=0). Pluses/minuses ignored per UC policy.
+                        <div className="flex justify-between text-slate-700 text-[9.5px]">
+                          <span className="font-sans">UC Fully Weighted:</span>
+                          <span>({ucTotals.tenthEleventhBasePoints} + {ucTotals.honorsPointsPotential}) ÷ {ucTotals.tenthEleventhCoursesCount || 1} = <strong>{ucTotals.fullyWeightedGpa}</strong></span>
+                        </div>
+                        <div className="text-[8.5px] text-amber-800/80 pt-0.5 font-sans italic border-t border-amber-200/40">
+                          ⚡ Truncates to two decimals without rounding per UC official guidelines (e.g. 200 ÷ 52 = 3.84). Max 8 honors points (max 4 from 10th grade).
                         </div>
                       </div>
                     </>
@@ -2146,15 +2166,28 @@ export default function Home() {
                         <span>Unweighted 4.33: <strong className="text-slate-800">{totals.unweightedGpa}</strong></span>
                       </div>
 
-                      {/* Stats Grid */}
+                      {/* Normal GPA Stats Grid matching Image 2: Sum of (Grade Point × Credits) / Total Credits */}
                       <div className="grid grid-cols-2 gap-4 w-full mt-6">
                         <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
-                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Total Credits</span>
-                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>{totals.totalCredits}</span>
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Sum of (GP × Credits)</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif", color: currentAccent.color }}>{totals.qualityPoints}</span>
+                          <span className="text-[8px] text-slate-400">Total Quality Points</span>
                         </div>
                         <div className="bg-white border border-[#1A1A1A]/10 p-4 rounded flex flex-col items-center gap-1">
-                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Quality Points</span>
-                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.qualityPoints}</span>
+                          <span className="text-slate-500 text-[9px] uppercase tracking-wider font-bold">Total Credits</span>
+                          <span className="text-2xl font-light italic text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>{totals.totalCredits}</span>
+                          <span className="text-[8px] text-slate-400">Completed Credits</span>
+                        </div>
+                      </div>
+
+                      {/* Formula Step-by-Step Breakdown (Image 2) */}
+                      <div className="w-full mt-3 p-2.5 bg-slate-50 border border-slate-200/70 rounded-lg text-left space-y-1 font-mono text-[10px]">
+                        <div className="flex justify-between items-center text-slate-900 font-bold">
+                          <span className="font-sans text-[9px] uppercase tracking-wider text-slate-500">Normal GPA Formula:</span>
+                          <span>{totals.qualityPoints} ÷ {totals.totalCredits || 1} = {totals.gpa}</span>
+                        </div>
+                        <div className="text-[8.5px] text-slate-400 font-sans italic pt-0.5 border-t border-slate-200/50">
+                          Formula: GPA = Sum of (Grade Point × Credits) ÷ Total Credits
                         </div>
                       </div>
                     </>
@@ -2193,7 +2226,7 @@ export default function Home() {
                     <div>
                       <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
                         <span>High School Standard</span>
-                        <span className="text-[8px] font-normal lowercase text-slate-400">(honors/AP weighted &amp; unweighted)</span>
+                        <span className="text-[8px] font-mono lowercase text-slate-400">Sum(GP × Cr) ÷ Total Cr</span>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="p-2.5 bg-white border border-[#1A1A1A]/10 rounded flex flex-col">
@@ -2219,9 +2252,12 @@ export default function Home() {
 
                     {/* Section 2: University of California Admissions Standard (10th-11th) */}
                     <div className="pt-2 border-t border-[#1A1A1A]/10">
-                      <div className="text-[9px] font-bold text-amber-900 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[13px] text-amber-700">school</span>
-                        <span>UC Admissions Benchmark (10th &amp; 11th Grade A-G)</span>
+                      <div className="text-[9px] font-bold text-amber-900 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                        <span className="flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[13px] text-amber-700">school</span>
+                          <span>UC Admissions Standard (10th &amp; 11th Grade)</span>
+                        </span>
+                        <span className="text-[8px] font-mono text-amber-800 font-normal">Base Pts ÷ Total Courses</span>
                       </div>
                       <div className="grid grid-cols-3 gap-1.5">
                         <div className="p-2 bg-amber-50/70 border border-amber-300/70 rounded flex flex-col items-center text-center">
@@ -2243,8 +2279,15 @@ export default function Home() {
                           <span className="text-xl font-light italic mt-0.5 text-[#1A1A1A]" style={{ fontFamily: "Georgia, serif" }}>
                             {ucTotals.unweightedGpa}
                           </span>
-                          <span className="text-[7.5px] text-slate-400">Flat 4.0 scale</span>
+                          <span className="text-[7.5px] text-slate-400">Truncated (no round)</span>
                         </div>
+                      </div>
+                      <div className="mt-1.5 p-1.5 bg-amber-50/50 border border-amber-200/50 rounded flex items-center justify-between text-[9px] text-amber-900 font-mono">
+                        <span>10th-11th Base Points: <strong>{ucTotals.tenthEleventhBasePoints}</strong></span>
+                        <span>•</span>
+                        <span>Courses: <strong>{ucTotals.tenthEleventhCoursesCount}</strong></span>
+                        <span>•</span>
+                        <span>Honors: <strong>{ucTotals.honorsPointsApplied} / 8</strong></span>
                       </div>
                     </div>
 
@@ -2252,7 +2295,7 @@ export default function Home() {
                     <div className="pt-2 border-t border-[#1A1A1A]/10">
                       <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
                         <span>Cumulative UC Scale (Grades 9–12)</span>
-                        <span className="text-[8px] font-normal lowercase text-slate-400">(all high school A-G)</span>
+                        <span className="text-[8px] font-mono lowercase text-slate-400">All High School A-G</span>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="p-2 bg-white border border-[#1A1A1A]/10 rounded flex items-center justify-between text-xs">
@@ -2263,6 +2306,11 @@ export default function Home() {
                           <span className="text-[9px] font-medium text-slate-600">Cumulative Unweighted:</span>
                           <span className="font-mono font-bold text-slate-800 text-sm">{ucTotals.cumulativeUnweightedGpa}</span>
                         </div>
+                      </div>
+                      <div className="mt-1.5 p-1.5 bg-slate-50 border border-slate-200/50 rounded flex items-center justify-between text-[9px] text-slate-600 font-mono">
+                        <span>9-12 Base Points: <strong>{ucTotals.cumulativeBasePoints}</strong></span>
+                        <span>•</span>
+                        <span>Total A-G Courses: <strong>{ucTotals.cumulativeCoursesCount}</strong></span>
                       </div>
                     </div>
                   </div>
