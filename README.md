@@ -32,14 +32,14 @@
 ### 2. 🏛️ Official University of California (UC) GPA Engine
 Calculates the three official University of California admissions metrics per California state guidelines:
 - **UC Capped Weighted GPA** *(Primary Admissions Benchmark)*:
-  $$\text{UC Capped GPA} = \frac{\text{10th \& 11th Base Points} + \text{Honors Points (Max 8)}}{\text{Total 10th \& 11th A-G Courses}}$$
+  $$\text{UC Capped GPA} = \frac{\text{10th and 11th Base Points} + \text{Honors Points (Max 8)}}{\text{Total 10th and 11th A-G Courses}}$$
   - Honors points are capped at a maximum of **8 semester points** (max 4 from 10th grade).
   - Only grades $A$, $B$, and $C$ earn honors points ($+1.0$).
   - Truncates to two decimal places without rounding (e.g., $200 \div 52 = 3.84$).
 - **UC Unweighted GPA**:
-  $$\text{UC Unweighted GPA} = \frac{\text{10th \& 11th Base Points}}{\text{Total 10th \& 11th A-G Courses}}$$
+  $$\text{UC Unweighted GPA} = \frac{\text{10th and 11th Base Points}}{\text{Total 10th and 11th A-G Courses}}$$
 - **UC Fully Weighted GPA (Uncapped)**:
-  $$\text{UC Fully Weighted GPA} = \frac{\text{10th \& 11th Base Points} + \text{All AP/IB Honors Points}}{\text{Total 10th \& 11th A-G Courses}}$$
+  $$\text{UC Fully Weighted GPA} = \frac{\text{10th and 11th Base Points} + \text{All AP/IB Honors Points}}{\text{Total 10th and 11th A-G Courses}}$$
 - **Cumulative UC High School Scale (Grades 9–12)**: Audits cumulative A-G progress across all high school years.
 - **A-G Subject Progress Tracker**: Visual progress bar tracking minimum requirements across Areas A through G.
 
